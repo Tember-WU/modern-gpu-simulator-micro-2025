@@ -31,6 +31,7 @@
 #include "../../abstract_hardware_model.h"
 
 #include <stdio.h>
+#include <deque>
 #include <unordered_map>
 #include <vector>
 #include <queue>
@@ -113,6 +114,14 @@ class Subcore {
   // the end of the subcore cycle m_greedy_pointer_fetch =
   // m_greedy_pointer_issue
   unsigned int m_greedy_pointer_fetch;
+
+  // Two-level active scheduler state. Warp IDs are local to this subcore,
+  // matching the set supervised by one legacy warp scheduler.
+  std::vector<unsigned int> m_two_level_active_warps;
+  std::deque<unsigned int> m_two_level_pending_warps;
+  scheduler_prioritization_type m_two_level_inner_prioritization;
+  scheduler_prioritization_type m_two_level_outer_prioritization;
+  unsigned int m_two_level_max_active_warps;
   // Disabled remodeled RRR state. The implementation used the same single-warp
   // ordering for issue and fetch, so a non-issuable turn warp could prevent all
   // other warps from fetching and permanently deadlock the SM.
@@ -201,6 +210,10 @@ class Subcore {
   std::vector<unsigned int> order_oldest(SM *shared_sm);
   std::vector<unsigned int> order_loose_round_robin(
       unsigned int last_issued_warp);
+  void initialize_two_level_active();
+  void update_two_level_active_warps(SM *shared_sm);
+  void rotate_two_level_active_after_issue(unsigned int issued_warp);
+  std::vector<unsigned int> order_two_level_active() const;
   // Disabled until remodeled RRR has an issue-only policy and an independent
   // fetch ordering. See the corresponding disabled implementation in
   // subcore.cc.

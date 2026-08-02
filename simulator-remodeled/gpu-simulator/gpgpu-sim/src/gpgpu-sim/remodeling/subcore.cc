@@ -71,6 +71,9 @@ Subcore::Subcore(unsigned subcore_id, const shader_core_config *config,
   m_reserved_slots_uniform_fixed_latency_rf_write_queue = 0;
   m_num_active_warps_subcore = 0;
   m_is_next_stage_of_issue_busy = false;
+  m_two_level_inner_prioritization = SCHEDULER_PRIORITIZATION_LRR;
+  m_two_level_outer_prioritization = SCHEDULER_PRIORITIZATION_SRR;
+  m_two_level_max_active_warps = 0;
 #if 0
   // Disabled: remodeled RRR must not share a single-candidate order between
   // issue and fetch because that can permanently starve the other warps.
@@ -369,6 +372,9 @@ void Subcore::issue(SM *shared_sm) {
   // bool is_any_waiting_l1c = false;
 
   modify_warp_state();
+  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
+    update_two_level_active_warps(shared_sm);
+  }
 #if 0
   // Disabled remodeled RRR: holding a non-issuable warp as the sole issue and
   // fetch candidate can stop all forward progress and trigger a deadlock.
@@ -475,6 +481,9 @@ void Subcore::issue(SM *shared_sm) {
           issue_warp(shared_sm, m_ISSUE_CONTROL_latch, pI, active_mask, sm_warp_id, fu, is_fixed_latency_inst, use_traditional_scoreboarding, has_dst_regs, dst_type);
           is_issued_inst = true;
           m_greedy_pointer_issue = subcore_warp_id;
+          if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
+            rotate_two_level_active_after_issue(subcore_warp_id);
+          }
 #if 0
           // Disabled together with the remodeled RRR turn state above.
           if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
@@ -773,6 +782,8 @@ std::vector<unsigned int> Subcore::order_warps(SM *shared_sm, unsigned int greed
       return order_loose_round_robin(greedy_pointer);
     case CONCRETE_SCHEDULER_GTO:
       return order_greedy_then_oldest(shared_sm, greedy_pointer);
+    case CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE:
+      return order_two_level_active();
     case CONCRETE_SCHEDULER_RRR:
       std::cerr
           << "RRR is disabled for the remodeled SM: its single-warp ordering "
@@ -813,6 +824,98 @@ std::vector<unsigned int> Subcore::order_loose_round_robin(
     result_list.push_back((last_issued_warp + offset) % num_warps);
   }
   return result_list;
+}
+
+void Subcore::initialize_two_level_active() {
+  unsigned int inner_level = 0;
+  unsigned int outer_level = 0;
+  const int parsed =
+      sscanf(m_config->gpgpu_scheduler_string, "two_level_active:%u:%u:%u",
+             &m_two_level_max_active_warps, &inner_level, &outer_level);
+
+  if (parsed != 3 || m_two_level_max_active_warps == 0 ||
+      m_two_level_max_active_warps > m_warps_of_subcore.size()) {
+    std::cerr << "Invalid remodeled two-level scheduler configuration: "
+              << m_config->gpgpu_scheduler_string
+              << ". Expected two_level_active:<1..warps_per_subcore>:0:1"
+              << std::endl;
+    abort();
+  }
+
+  m_two_level_inner_prioritization =
+      static_cast<scheduler_prioritization_type>(inner_level);
+  m_two_level_outer_prioritization =
+      static_cast<scheduler_prioritization_type>(outer_level);
+  if (m_two_level_inner_prioritization != SCHEDULER_PRIORITIZATION_LRR ||
+      m_two_level_outer_prioritization != SCHEDULER_PRIORITIZATION_SRR) {
+    std::cerr << "Remodeled two-level scheduler currently supports only "
+                 "inner LRR (0) and outer SRR/FIFO (1)"
+              << std::endl;
+    abort();
+  }
+
+  m_two_level_active_warps.clear();
+  m_two_level_pending_warps.clear();
+  for (unsigned int warp_id = 0; warp_id < m_warps_of_subcore.size();
+       ++warp_id) {
+    if (m_two_level_active_warps.size() < m_two_level_max_active_warps) {
+      m_two_level_active_warps.push_back(warp_id);
+    } else {
+      m_two_level_pending_warps.push_back(warp_id);
+    }
+  }
+}
+
+void Subcore::update_two_level_active_warps(SM *shared_sm) {
+  unsigned int num_demoted = 0;
+  for (auto iter = m_two_level_active_warps.begin();
+       iter != m_two_level_active_warps.end();) {
+    const unsigned int local_warp_id = *iter;
+    shd_warp_t *warp = m_warps_of_subcore[local_warp_id];
+    bool waiting = warp->waiting();
+
+    if (!waiting && warp->get_IBuffer_remodeled()->is_next_valid()) {
+      const warp_inst_t *inst = warp->get_IBuffer_remodeled()->next_inst();
+      for (int input = 0; input < MAX_INPUT_VALUES; ++input) {
+        if (inst->in[input] > 0 &&
+            shared_sm->get_scoreboard()->islongop(warp->get_warp_id(),
+                                                   inst->in[input])) {
+          waiting = true;
+          break;
+        }
+      }
+    }
+
+    if (waiting) {
+      m_two_level_pending_warps.push_back(local_warp_id);
+      iter = m_two_level_active_warps.erase(iter);
+      ++num_demoted;
+    } else {
+      ++iter;
+    }
+  }
+
+  unsigned int num_promoted = 0;
+  while (m_two_level_active_warps.size() < m_two_level_max_active_warps &&
+         !m_two_level_pending_warps.empty()) {
+    m_two_level_active_warps.push_back(m_two_level_pending_warps.front());
+    m_two_level_pending_warps.pop_front();
+    ++num_promoted;
+  }
+  assert(num_promoted == num_demoted);
+}
+
+void Subcore::rotate_two_level_active_after_issue(unsigned int issued_warp) {
+  assert(m_two_level_inner_prioritization == SCHEDULER_PRIORITIZATION_LRR);
+  auto issued = std::find(m_two_level_active_warps.begin(),
+                          m_two_level_active_warps.end(), issued_warp);
+  assert(issued != m_two_level_active_warps.end());
+  std::rotate(m_two_level_active_warps.begin(), std::next(issued),
+              m_two_level_active_warps.end());
+}
+
+std::vector<unsigned int> Subcore::order_two_level_active() const {
+  return m_two_level_active_warps;
 }
 
 // Disabled remodeled RRR implementation. Unlike the legacy SM, the remodeled
@@ -1088,6 +1191,9 @@ void Subcore::fetch(SM *shared_sm) {
           shared_sm->get_gpu()->gpu_sim_cycle);
       delete mf;
     }
+    // The remodeled SM applies the same warp policy to fetch and issue.
+    // For two-level scheduling this means pending warps become fetch-eligible
+    // only after promotion into the active set.
     std::vector<unsigned int> priority_ordered_for_fetch = order_warps(shared_sm, m_greedy_pointer_fetch);
     for (auto c_warp_id : priority_ordered_for_fetch) {
       shd_warp_t *c_warp = m_warps_of_subcore[c_warp_id];
@@ -1169,6 +1275,9 @@ void Subcore::assign_warp_to_subcore(shd_warp_t *warp) {
 }
 
 void Subcore::finilized_warps_assignation() {
+  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
+    initialize_two_level_active();
+  }
   if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_GTO) {
     // Match the legacy GTO scheduler: start with the oldest local warp.
     m_greedy_pointer_issue = 0;
