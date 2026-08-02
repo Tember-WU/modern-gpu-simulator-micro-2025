@@ -71,6 +71,12 @@ Subcore::Subcore(unsigned subcore_id, const shader_core_config *config,
   m_reserved_slots_uniform_fixed_latency_rf_write_queue = 0;
   m_num_active_warps_subcore = 0;
   m_is_next_stage_of_issue_busy = false;
+#if 0
+  // Disabled: remodeled RRR must not share a single-candidate order between
+  // issue and fetch because that can permanently starve the other warps.
+  m_rrr_current_turn_warp = 0;
+  m_rrr_issued_last_cycle = false;
+#endif
 }
 
 Subcore::~Subcore() {
@@ -363,12 +369,20 @@ void Subcore::issue(SM *shared_sm) {
   // bool is_any_waiting_l1c = false;
 
   modify_warp_state();
+#if 0
+  // Disabled remodeled RRR: holding a non-issuable warp as the sole issue and
+  // fetch candidate can stop all forward progress and trigger a deadlock.
+  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
+    update_strict_round_robin_turn();
+    m_rrr_issued_last_cycle = false;
+  }
+#endif
   if(m_num_pending_cycles_with_issue_port_busy > 0) {
     m_num_pending_cycles_with_issue_port_busy--;
   }else if(m_ISSUE_CONTROL_latch.has_free()) {
     is_issue_port_busy = false;
     is_next_stage_availabe = true;
-    std::vector<unsigned int> priority_ordered_for_issue = order_greedy_then_highest_id(shared_sm, m_greedy_pointer_issue);
+    std::vector<unsigned int> priority_ordered_for_issue = order_warps(shared_sm, m_greedy_pointer_issue);
     for (auto c_warp_id : priority_ordered_for_issue) {
       shd_warp_t *c_warp = m_warps_of_subcore[c_warp_id];
       // Don't consider warps that are not yet valid
@@ -461,6 +475,12 @@ void Subcore::issue(SM *shared_sm) {
           issue_warp(shared_sm, m_ISSUE_CONTROL_latch, pI, active_mask, sm_warp_id, fu, is_fixed_latency_inst, use_traditional_scoreboarding, has_dst_regs, dst_type);
           is_issued_inst = true;
           m_greedy_pointer_issue = subcore_warp_id;
+#if 0
+          // Disabled together with the remodeled RRR turn state above.
+          if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
+            m_rrr_issued_last_cycle = true;
+          }
+#endif
           m_num_pending_cycles_constant_cache_misses_before_switch_to_other_warp = m_config->num_const_cache_cycle_misses_before_switch_to_other_warp;
           break;
         }else {
@@ -747,6 +767,86 @@ void Subcore::issue_warp(SM *shared_sm, register_set_uniptr &dispatch_latch, war
   }
 }
 
+std::vector<unsigned int> Subcore::order_warps(SM *shared_sm, unsigned int greedy_pointer) {
+  switch (m_config->warp_scheduling_mode) {
+    case CONCRETE_SCHEDULER_LRR:
+      return order_loose_round_robin(greedy_pointer);
+    case CONCRETE_SCHEDULER_GTO:
+      return order_greedy_then_oldest(shared_sm, greedy_pointer);
+    case CONCRETE_SCHEDULER_RRR:
+      std::cerr
+          << "RRR is disabled for the remodeled SM: its single-warp ordering "
+             "was shared by issue and fetch and can deadlock when the current "
+             "turn warp cannot issue."
+          << std::endl;
+      abort();
+    case CONCRETE_SCHEDULER_OLDEST_FIRST:
+      return order_oldest(shared_sm);
+    case CONCRETE_SCHEDULER_GTHID:
+      return order_greedy_then_highest_id(shared_sm, greedy_pointer);
+    default:
+      std::cerr << "Warp scheduler policy "
+                << static_cast<int>(m_config->warp_scheduling_mode)
+                << " is not implemented for the remodeled SM" << std::endl;
+      abort();
+  }
+}
+
+std::vector<unsigned int> Subcore::order_oldest(SM *shared_sm) {
+  std::vector<unsigned int> result_list;
+  std::vector<shd_warp_t *> temp = m_warps_of_subcore;
+  std::sort(temp.begin(), temp.end(), sort_warps_by_oldest_dynamic_id);
+  for (auto c_warp : temp) {
+    if (!c_warp->done_exit()) {
+      result_list.push_back(translate_warp_id_of_sm_to_subcore(
+          c_warp->get_warp_id(), shared_sm->get_num_subcores()));
+    }
+  }
+  return result_list;
+}
+
+std::vector<unsigned int> Subcore::order_loose_round_robin(
+    unsigned int last_issued_warp) {
+  std::vector<unsigned int> result_list;
+  const unsigned int num_warps = m_warps_of_subcore.size();
+  for (unsigned int offset = 1; offset <= num_warps; ++offset) {
+    result_list.push_back((last_issued_warp + offset) % num_warps);
+  }
+  return result_list;
+}
+
+// Disabled remodeled RRR implementation. Unlike the legacy SM, the remodeled
+// SM reused this single-candidate order in both issue() and fetch(). If the
+// current warp had no issuable instruction but was neither done_exit() nor
+// waiting(), update_strict_round_robin_turn() retained it forever; no other
+// warp could issue or fetch, which caused the observed backprop deadlock.
+// Re-enable only after fetch has an independent multi-warp ordering.
+#if 0
+std::vector<unsigned int> Subcore::order_strict_round_robin() {
+  return {m_rrr_current_turn_warp};
+}
+
+void Subcore::update_strict_round_robin_turn() {
+  shd_warp_t *current_warp = m_warps_of_subcore[m_rrr_current_turn_warp];
+  if (!m_rrr_issued_last_cycle && !current_warp->done_exit() &&
+      !current_warp->waiting()) {
+    return;
+  }
+
+  const unsigned int num_warps = m_warps_of_subcore.size();
+  for (unsigned int offset = 1; offset <= num_warps; ++offset) {
+    const unsigned int candidate =
+        (m_rrr_current_turn_warp + offset) % num_warps;
+    shd_warp_t *candidate_warp = m_warps_of_subcore[candidate];
+    if (!candidate_warp->done_exit() && !candidate_warp->waiting()) {
+      m_rrr_current_turn_warp = candidate;
+      return;
+    }
+  }
+}
+#endif
+
+
 std::vector<unsigned int> Subcore::order_greedy_then_highest_id(SM *shared_sm, unsigned int greedy_pointer) {
   std::vector<unsigned int> result_list;
   std::vector<shd_warp_t*> temp = m_warps_of_subcore;
@@ -773,6 +873,36 @@ bool Subcore::sort_warps_by_highest_id_dynamic_id(shd_warp_t *lhs,
     }
   } else {
     return lhs > rhs;
+  }
+}
+
+std::vector<unsigned int> Subcore::order_greedy_then_oldest(SM *shared_sm, unsigned int greedy_pointer) {
+  std::vector<unsigned int> result_list;
+  std::vector<shd_warp_t *> temp = m_warps_of_subcore;
+  result_list.push_back(greedy_pointer);
+  std::sort(temp.begin(), temp.end(), sort_warps_by_oldest_dynamic_id);
+  for (auto c_warp : temp) {
+    unsigned int warp_subcore_id = translate_warp_id_of_sm_to_subcore(
+        c_warp->get_warp_id(), shared_sm->get_num_subcores());
+    if (!c_warp->done_exit() && (warp_subcore_id != greedy_pointer)) {
+      result_list.push_back(warp_subcore_id);
+    }
+  }
+  return result_list;
+}
+
+bool Subcore::sort_warps_by_oldest_dynamic_id(shd_warp_t *lhs,
+                                              shd_warp_t *rhs) {
+  if (rhs && lhs) {
+    if (lhs->done_exit() || lhs->waiting()) {
+      return false;
+    } else if (rhs->done_exit() || rhs->waiting()) {
+      return true;
+    } else {
+      return lhs->get_dynamic_warp_id() < rhs->get_dynamic_warp_id();
+    }
+  } else {
+    return lhs < rhs;
   }
 }
 
@@ -958,7 +1088,7 @@ void Subcore::fetch(SM *shared_sm) {
           shared_sm->get_gpu()->gpu_sim_cycle);
       delete mf;
     }
-    std::vector<unsigned int> priority_ordered_for_fetch = order_greedy_then_highest_id(shared_sm, m_greedy_pointer_fetch);
+    std::vector<unsigned int> priority_ordered_for_fetch = order_warps(shared_sm, m_greedy_pointer_fetch);
     for (auto c_warp_id : priority_ordered_for_fetch) {
       shd_warp_t *c_warp = m_warps_of_subcore[c_warp_id];
       shared_sm->check_if_warp_has_finished_executing_and_can_be_reclaim(c_warp);
@@ -1039,8 +1169,19 @@ void Subcore::assign_warp_to_subcore(shd_warp_t *warp) {
 }
 
 void Subcore::finilized_warps_assignation() {
-  m_greedy_pointer_issue = m_warps_of_subcore.size() - 1;
-  m_greedy_pointer_fetch = m_warps_of_subcore.size() - 1;
+  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_GTO) {
+    // Match the legacy GTO scheduler: start with the oldest local warp.
+    m_greedy_pointer_issue = 0;
+    m_greedy_pointer_fetch = 0;
+  } else {
+    m_greedy_pointer_issue = m_warps_of_subcore.size() - 1;
+    m_greedy_pointer_fetch = m_warps_of_subcore.size() - 1;
+  }
+#if 0
+  // Disabled together with the remodeled RRR implementation.
+  m_rrr_current_turn_warp = 0;
+  m_rrr_issued_last_cycle = false;
+#endif
 }
 
 void Subcore::create_pipeline() {  

@@ -655,7 +655,8 @@ void shader_core_config::reg_options(class OptionParser *opp) {
       "1");
   option_parser_register(
       opp, "-gpgpu_scheduler", OPT_CSTR, &gpgpu_scheduler_string,
-      "Scheduler configuration: < lrr | gto | two_level_active > "
+      "Scheduler configuration: < lrr | rrr | gto | oldest | gthid | "
+      "two_level_active > "
       "If "
       "two_level_active:<num_active_warps>:<inner_prioritization>:<outer_"
       "prioritization>"

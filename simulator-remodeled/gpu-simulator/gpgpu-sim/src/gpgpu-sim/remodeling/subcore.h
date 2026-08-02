@@ -113,6 +113,13 @@ class Subcore {
   // the end of the subcore cycle m_greedy_pointer_fetch =
   // m_greedy_pointer_issue
   unsigned int m_greedy_pointer_fetch;
+  // Disabled remodeled RRR state. The implementation used the same single-warp
+  // ordering for issue and fetch, so a non-issuable turn warp could prevent all
+  // other warps from fetching and permanently deadlock the SM.
+#if 0
+  unsigned int m_rrr_current_turn_warp;
+  bool m_rrr_issued_last_cycle;
+#endif
 
   bool m_is_next_stage_of_issue_busy;
 
@@ -187,7 +194,23 @@ class Subcore {
   std::vector<Wait_Barrier_Checking> wait_barriers_to_check_depbar(const warp_inst_t* inst, unsigned int subcore_warp_id);
   bool is_wait_barriers_ready(std::vector<Wait_Barrier_Checking> &wait_barriers_checking, unsigned int subcore_warp_id);
   void modify_warp_state();
+  std::vector<unsigned int> order_warps(SM *shared_sm,
+                                        unsigned int greedy_pointer);
+  std::vector<unsigned int> order_greedy_then_oldest(
+      SM *shared_sm, unsigned int greedy_pointer);
+  std::vector<unsigned int> order_oldest(SM *shared_sm);
+  std::vector<unsigned int> order_loose_round_robin(
+      unsigned int last_issued_warp);
+  // Disabled until remodeled RRR has an issue-only policy and an independent
+  // fetch ordering. See the corresponding disabled implementation in
+  // subcore.cc.
+#if 0
+  std::vector<unsigned int> order_strict_round_robin();
+  void update_strict_round_robin_turn();
+#endif
   std::vector<unsigned int> order_greedy_then_highest_id(SM *shared_sm, unsigned int greedy_pointer);
+  static bool sort_warps_by_oldest_dynamic_id(shd_warp_t *lhs,
+                                              shd_warp_t *rhs);
   static bool sort_warps_by_highest_id_dynamic_id(shd_warp_t *lhs,
                                                 shd_warp_t *rhs);
   functional_unit* get_fu(const warp_inst_t *pI);

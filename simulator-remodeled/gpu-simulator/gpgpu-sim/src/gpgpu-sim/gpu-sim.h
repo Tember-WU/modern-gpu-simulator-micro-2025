@@ -566,21 +566,22 @@ class gpgpu_sim_config : public power_config,
     // scedulers
     // must currently occur after all inputs have been initialized.
     std::string sched_config = m_shader_config.gpgpu_scheduler_string;
-    const concrete_scheduler scheduler =
-        sched_config.find("lrr") != std::string::npos
-            ? CONCRETE_SCHEDULER_LRR
-            : sched_config.find("two_level_active") != std::string::npos
-                  ? CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE
-                  : sched_config.find("gto") != std::string::npos
-                        ? CONCRETE_SCHEDULER_GTO
-                        : sched_config.find("rrr") != std::string::npos
-                              ? CONCRETE_SCHEDULER_RRR
-                        : sched_config.find("old") != std::string::npos
-                              ? CONCRETE_SCHEDULER_OLDEST_FIRST
-                              : sched_config.find("warp_limiting") !=
-                                        std::string::npos
-                                    ? CONCRETE_SCHEDULER_WARP_LIMITING
-                                    : NUM_CONCRETE_SCHEDULERS;
+    concrete_scheduler scheduler = NUM_CONCRETE_SCHEDULERS;
+    if (sched_config.find("lrr") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_LRR;
+    } else if (sched_config.find("two_level_active") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE;
+    } else if (sched_config.find("gthid") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_GTHID;
+    } else if (sched_config.find("gto") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_GTO;
+    } else if (sched_config.find("rrr") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_RRR;
+    } else if (sched_config.find("old") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_OLDEST_FIRST;
+    } else if (sched_config.find("warp_limiting") != std::string::npos) {
+      scheduler = CONCRETE_SCHEDULER_WARP_LIMITING;
+    }
     assert(scheduler != NUM_CONCRETE_SCHEDULERS);
     m_shader_config.warp_scheduling_mode = scheduler;
     // MOD. End. General parse options
