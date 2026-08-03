@@ -122,13 +122,16 @@ class Subcore {
   scheduler_prioritization_type m_two_level_inner_prioritization;
   scheduler_prioritization_type m_two_level_outer_prioritization;
   unsigned int m_two_level_max_active_warps;
-  // Disabled remodeled RRR state. The implementation used the same single-warp
-  // ordering for issue and fetch, so a non-issuable turn warp could prevent all
-  // other warps from fetching and permanently deadlock the SM.
-#if 0
+
+  // Static warp limiting scheduler state. The legacy implementation supports
+  // GTO prioritization and applies the configured limit per scheduler/subcore.
+  scheduler_prioritization_type m_warp_limiting_prioritization;
+  unsigned int m_warp_limiting_limit;
+  // RRR keeps a single current turn for issue. Fetch expands the same
+  // round-robin priority order to all warps so the current turn cannot starve
+  // the front end while waiting for its next instruction.
   unsigned int m_rrr_current_turn_warp;
   bool m_rrr_issued_last_cycle;
-#endif
 
   bool m_is_next_stage_of_issue_busy;
 
@@ -205,6 +208,8 @@ class Subcore {
   void modify_warp_state();
   std::vector<unsigned int> order_warps(SM *shared_sm,
                                         unsigned int greedy_pointer);
+  std::vector<unsigned int> order_warps_for_fetch(
+      SM *shared_sm, unsigned int greedy_pointer);
   std::vector<unsigned int> order_greedy_then_oldest(
       SM *shared_sm, unsigned int greedy_pointer);
   std::vector<unsigned int> order_oldest(SM *shared_sm);
@@ -214,13 +219,12 @@ class Subcore {
   void update_two_level_active_warps(SM *shared_sm);
   void rotate_two_level_active_after_issue(unsigned int issued_warp);
   std::vector<unsigned int> order_two_level_active() const;
-  // Disabled until remodeled RRR has an issue-only policy and an independent
-  // fetch ordering. See the corresponding disabled implementation in
-  // subcore.cc.
-#if 0
+  void initialize_warp_limiting();
+  std::vector<unsigned int> order_warp_limiting(
+      unsigned int greedy_pointer) const;
   std::vector<unsigned int> order_strict_round_robin();
+  std::vector<unsigned int> order_strict_round_robin_for_fetch() const;
   void update_strict_round_robin_turn();
-#endif
   std::vector<unsigned int> order_greedy_then_highest_id(SM *shared_sm, unsigned int greedy_pointer);
   static bool sort_warps_by_oldest_dynamic_id(shd_warp_t *lhs,
                                               shd_warp_t *rhs);

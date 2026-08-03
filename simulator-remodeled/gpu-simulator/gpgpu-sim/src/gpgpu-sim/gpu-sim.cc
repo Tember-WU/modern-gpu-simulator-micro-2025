@@ -656,10 +656,11 @@ void shader_core_config::reg_options(class OptionParser *opp) {
   option_parser_register(
       opp, "-gpgpu_scheduler", OPT_CSTR, &gpgpu_scheduler_string,
       "Scheduler configuration: < lrr | rrr | gto | oldest | gthid | "
-      "two_level_active > "
+      "two_level_active | warp_limiting > "
       "If "
       "two_level_active:<num_active_warps>:<inner_prioritization>:<outer_"
       "prioritization>"
+      " or warp_limiting:<prioritization>:<num_warps_to_limit>"
       "For complete list of prioritization values see shader.h enum "
       "scheduler_prioritization_type"
       "Default: gto",

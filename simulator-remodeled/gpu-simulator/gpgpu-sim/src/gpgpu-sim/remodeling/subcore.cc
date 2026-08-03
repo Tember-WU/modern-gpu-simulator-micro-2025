@@ -74,12 +74,10 @@ Subcore::Subcore(unsigned subcore_id, const shader_core_config *config,
   m_two_level_inner_prioritization = SCHEDULER_PRIORITIZATION_LRR;
   m_two_level_outer_prioritization = SCHEDULER_PRIORITIZATION_SRR;
   m_two_level_max_active_warps = 0;
-#if 0
-  // Disabled: remodeled RRR must not share a single-candidate order between
-  // issue and fetch because that can permanently starve the other warps.
+  m_warp_limiting_prioritization = SCHEDULER_PRIORITIZATION_GTO;
+  m_warp_limiting_limit = 0;
   m_rrr_current_turn_warp = 0;
   m_rrr_issued_last_cycle = false;
-#endif
 }
 
 Subcore::~Subcore() {
@@ -375,14 +373,10 @@ void Subcore::issue(SM *shared_sm) {
   if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
     update_two_level_active_warps(shared_sm);
   }
-#if 0
-  // Disabled remodeled RRR: holding a non-issuable warp as the sole issue and
-  // fetch candidate can stop all forward progress and trigger a deadlock.
   if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
     update_strict_round_robin_turn();
     m_rrr_issued_last_cycle = false;
   }
-#endif
   if(m_num_pending_cycles_with_issue_port_busy > 0) {
     m_num_pending_cycles_with_issue_port_busy--;
   }else if(m_ISSUE_CONTROL_latch.has_free()) {
@@ -484,12 +478,9 @@ void Subcore::issue(SM *shared_sm) {
           if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
             rotate_two_level_active_after_issue(subcore_warp_id);
           }
-#if 0
-          // Disabled together with the remodeled RRR turn state above.
           if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
             m_rrr_issued_last_cycle = true;
           }
-#endif
           m_num_pending_cycles_constant_cache_misses_before_switch_to_other_warp = m_config->num_const_cache_cycle_misses_before_switch_to_other_warp;
           break;
         }else {
@@ -784,13 +775,12 @@ std::vector<unsigned int> Subcore::order_warps(SM *shared_sm, unsigned int greed
       return order_greedy_then_oldest(shared_sm, greedy_pointer);
     case CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE:
       return order_two_level_active();
+    case CONCRETE_SCHEDULER_WARP_LIMITING:
+      return order_warp_limiting(greedy_pointer);
     case CONCRETE_SCHEDULER_RRR:
-      std::cerr
-          << "RRR is disabled for the remodeled SM: its single-warp ordering "
-             "was shared by issue and fetch and can deadlock when the current "
-             "turn warp cannot issue."
-          << std::endl;
-      abort();
+      // Issue preserves the legacy strict-RR singleton candidate set. Fetch
+      // expands the same priority order in order_warps_for_fetch().
+      return order_strict_round_robin();
     case CONCRETE_SCHEDULER_OLDEST_FIRST:
       return order_oldest(shared_sm);
     case CONCRETE_SCHEDULER_GTHID:
@@ -800,6 +790,22 @@ std::vector<unsigned int> Subcore::order_warps(SM *shared_sm, unsigned int greed
                 << static_cast<int>(m_config->warp_scheduling_mode)
                 << " is not implemented for the remodeled SM" << std::endl;
       abort();
+  }
+}
+
+std::vector<unsigned int> Subcore::order_warps_for_fetch(
+    SM *shared_sm, unsigned int greedy_pointer) {
+  // Most remodeled policies intentionally use exactly the same order for
+  // issue and fetch. RRR and warp-limiting are exceptions: their issue policy
+  // truncates the candidate set, which can starve a warp needed for front-end
+  // progress. Fetch keeps the same priority prefix but appends all warps.
+  switch (m_config->warp_scheduling_mode) {
+    case CONCRETE_SCHEDULER_RRR:
+      return order_strict_round_robin_for_fetch();
+    case CONCRETE_SCHEDULER_WARP_LIMITING:
+      return order_greedy_then_oldest(shared_sm, greedy_pointer);
+    default:
+      return order_warps(shared_sm, greedy_pointer);
   }
 }
 
@@ -918,15 +924,67 @@ std::vector<unsigned int> Subcore::order_two_level_active() const {
   return m_two_level_active_warps;
 }
 
-// Disabled remodeled RRR implementation. Unlike the legacy SM, the remodeled
-// SM reused this single-candidate order in both issue() and fetch(). If the
-// current warp had no issuable instruction but was neither done_exit() nor
-// waiting(), update_strict_round_robin_turn() retained it forever; no other
-// warp could issue or fetch, which caused the observed backprop deadlock.
-// Re-enable only after fetch has an independent multi-warp ordering.
-#if 0
+void Subcore::initialize_warp_limiting() {
+  unsigned int prioritization = 0;
+  const int parsed =
+      sscanf(m_config->gpgpu_scheduler_string, "warp_limiting:%u:%u",
+             &prioritization, &m_warp_limiting_limit);
+
+  m_warp_limiting_prioritization =
+      static_cast<scheduler_prioritization_type>(prioritization);
+  if (parsed != 2 || m_warp_limiting_limit == 0 ||
+      m_warp_limiting_limit > m_config->max_warps_per_shader ||
+      m_warp_limiting_prioritization != SCHEDULER_PRIORITIZATION_GTO) {
+    std::cerr << "Invalid remodeled warp-limiting scheduler configuration: "
+              << m_config->gpgpu_scheduler_string
+              << ". Expected warp_limiting:2:<1..max_warps_per_shader>; "
+                 "only GTO prioritization (2) is supported"
+              << std::endl;
+    abort();
+  }
+}
+
+std::vector<unsigned int> Subcore::order_warp_limiting(unsigned int greedy_pointer) const {
+  assert(m_warp_limiting_prioritization == SCHEDULER_PRIORITIZATION_GTO);
+  assert(greedy_pointer < m_warps_of_subcore.size());
+
+  // Match legacy order_by_priority(): retain the greedy warp, then inspect the
+  // oldest `limit` supervised warps and append those that are not the greedy
+  // warp. Consequently, the result can contain limit + 1 warps when the greedy
+  // warp is outside the oldest limited window.
+  std::vector<unsigned int> result_list;
+  result_list.push_back(greedy_pointer);
+
+  std::vector<shd_warp_t *> temp = m_warps_of_subcore;
+  std::sort(temp.begin(), temp.end(), sort_warps_by_oldest_dynamic_id);
+  const unsigned int num_warps_to_consider = std::min(m_warp_limiting_limit, static_cast<unsigned int>(temp.size()));
+  for (unsigned int index = 0; index < num_warps_to_consider; ++index) {
+    const auto local_warp = std::find(m_warps_of_subcore.begin(), m_warps_of_subcore.end(), temp[index]);
+    assert(local_warp != m_warps_of_subcore.end());
+    const unsigned int local_warp_id = static_cast<unsigned int>(local_warp - m_warps_of_subcore.begin());
+    if (local_warp_id != greedy_pointer) {
+      result_list.push_back(local_warp_id);
+    }
+  }
+  return result_list;
+}
+
 std::vector<unsigned int> Subcore::order_strict_round_robin() {
   return {m_rrr_current_turn_warp};
+}
+
+std::vector<unsigned int> Subcore::order_strict_round_robin_for_fetch() const {
+  std::vector<unsigned int> result;
+  const unsigned int num_warps = m_warps_of_subcore.size();
+  if (num_warps == 0) return result;
+
+  // The current RRR turn stays highest priority, just as at issue. Fetch must
+  // not discard lower-priority warps: one of them may need to fetch before the
+  // current turn can issue and advance the round-robin token.
+  for (unsigned int offset = 0; offset < num_warps; ++offset) {
+    result.push_back((m_rrr_current_turn_warp + offset) % num_warps);
+  }
+  return result;
 }
 
 void Subcore::update_strict_round_robin_turn() {
@@ -947,7 +1005,6 @@ void Subcore::update_strict_round_robin_turn() {
     }
   }
 }
-#endif
 
 
 std::vector<unsigned int> Subcore::order_greedy_then_highest_id(SM *shared_sm, unsigned int greedy_pointer) {
@@ -1191,10 +1248,11 @@ void Subcore::fetch(SM *shared_sm) {
           shared_sm->get_gpu()->gpu_sim_cycle);
       delete mf;
     }
-    // The remodeled SM applies the same warp policy to fetch and issue.
-    // For two-level scheduling this means pending warps become fetch-eligible
-    // only after promotion into the active set.
-    std::vector<unsigned int> priority_ordered_for_fetch = order_warps(shared_sm, m_greedy_pointer_fetch);
+    // LRR, GTO, oldest, GTHID, and two-level share the exact issue order. RRR
+    // and warp-limiting preserve issue priority at fetch but do not truncate
+    // the candidate set, avoiding front-end starvation and deadlock.
+    std::vector<unsigned int> priority_ordered_for_fetch =
+        order_warps_for_fetch(shared_sm, m_greedy_pointer_fetch);
     for (auto c_warp_id : priority_ordered_for_fetch) {
       shd_warp_t *c_warp = m_warps_of_subcore[c_warp_id];
       shared_sm->check_if_warp_has_finished_executing_and_can_be_reclaim(c_warp);
@@ -1278,7 +1336,11 @@ void Subcore::finilized_warps_assignation() {
   if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
     initialize_two_level_active();
   }
-  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_GTO) {
+  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_WARP_LIMITING) {
+    initialize_warp_limiting();
+  }
+  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_GTO ||
+      m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_WARP_LIMITING) {
     // Match the legacy GTO scheduler: start with the oldest local warp.
     m_greedy_pointer_issue = 0;
     m_greedy_pointer_fetch = 0;
@@ -1286,11 +1348,8 @@ void Subcore::finilized_warps_assignation() {
     m_greedy_pointer_issue = m_warps_of_subcore.size() - 1;
     m_greedy_pointer_fetch = m_warps_of_subcore.size() - 1;
   }
-#if 0
-  // Disabled together with the remodeled RRR implementation.
   m_rrr_current_turn_warp = 0;
   m_rrr_issued_last_cycle = false;
-#endif
 }
 
 void Subcore::create_pipeline() {  
