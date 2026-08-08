@@ -1,0 +1,3 @@
+set -e
+
+export CUDA_VERSION="12.8"; export CUDA_VISIBLE_DEVICES="0" ; export TRACES_FOLDER=/workspace/modern-gpu-simulator-micro-2025/simulator-remodeled/hw_run/traces/device-0/12.8/hotspot-rodinia-2.0-ft/30_6_40___data_result_30_6_40_txt/traces; CUDA_INJECTION64_PATH=/workspace/modern-gpu-simulator-micro-2025/simulator-remodeled/util/tracer_nvbit/tracer_tool/tracer_tool.so ; LD_PRELOAD=/workspace/modern-gpu-simulator-micro-2025/simulator-remodeled/util/tracer_nvbit/tracer_tool/tracer_tool.so /workspace/modern-gpu-simulator-micro-2025/simulator-remodeled/gpu-app-collection/src/..//bin/12.8/release/hotspot-rodinia-2.0-ft 30 6 40 ./data/result_30_6_40.txt ;

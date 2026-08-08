@@ -1,0 +1,5 @@
+device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
+0, 0, kernel-1.trace, _Z14dynproc_kerneliPiS_S_iiii, 5, 1, 1, 5, 256, 1, 1, 256, 21695,21695
+0, 0, kernel-2.trace, _Z14dynproc_kerneliPiS_S_iiii, 5, 1, 1, 5, 256, 1, 1, 256, 21695,21695
+0, 0, kernel-3.trace, _Z14dynproc_kerneliPiS_S_iiii, 5, 1, 1, 5, 256, 1, 1, 256, 21695,21695
+0, 0, kernel-4.trace, _Z14dynproc_kerneliPiS_S_iiii, 5, 1, 1, 5, 256, 1, 1, 256, 18255,18255
