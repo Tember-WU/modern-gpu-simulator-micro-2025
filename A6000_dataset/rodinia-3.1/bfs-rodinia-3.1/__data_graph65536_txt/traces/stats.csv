@@ -1,0 +1,21 @@
+device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
+0, 0, kernel-1.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 70324,70324
+0, 0, kernel-2.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 69920,69920
+0, 0, kernel-3.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 74520,74520
+0, 0, kernel-4.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 71288,71288
+0, 0, kernel-5.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 99036,99036
+0, 0, kernel-6.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 79280,79280
+0, 0, kernel-7.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 243531,243531
+0, 0, kernel-8.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 112616,112616
+0, 0, kernel-9.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 869204,869204
+0, 0, kernel-10.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 142712,142712
+0, 0, kernel-11.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 1761552,1761552
+0, 0, kernel-12.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 143360,143360
+0, 0, kernel-13.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 2008621,2008621
+0, 0, kernel-14.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 143360,143360
+0, 0, kernel-15.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 1584700,1584700
+0, 0, kernel-16.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 95156,95156
+0, 0, kernel-17.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 257757,257757
+0, 0, kernel-18.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 69848,69848
+0, 0, kernel-19.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 128, 1, 1, 128, 512, 1, 1, 512, 70463,70463
+0, 0, kernel-20.trace, _Z7Kernel2PbS_S_S_i, 128, 1, 1, 128, 512, 1, 1, 512, 69632,69632

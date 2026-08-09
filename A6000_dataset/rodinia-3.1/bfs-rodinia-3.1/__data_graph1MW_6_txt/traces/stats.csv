@@ -1,0 +1,25 @@
+device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
+0, 0, kernel-1.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1062969,1062969
+0, 0, kernel-2.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1062790,1062790
+0, 0, kernel-3.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1065001,1065001
+0, 0, kernel-4.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1063474,1063474
+0, 0, kernel-5.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1075720,1075720
+0, 0, kernel-6.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1066786,1066786
+0, 0, kernel-7.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1134538,1134538
+0, 0, kernel-8.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1087486,1087486
+0, 0, kernel-9.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1483999,1483999
+0, 0, kernel-10.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1196674,1196674
+0, 0, kernel-11.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 3343128,3343128
+0, 0, kernel-12.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1638214,1638214
+0, 0, kernel-13.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 11274455,11274455
+0, 0, kernel-14.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 2167018,2167018
+0, 0, kernel-15.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 24069105,24069105
+0, 0, kernel-16.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 2187682,2187682
+0, 0, kernel-17.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 27876792,27876792
+0, 0, kernel-18.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 2187646,2187646
+0, 0, kernel-19.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 24283075,24283075
+0, 0, kernel-20.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1510630,1510630
+0, 0, kernel-21.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 5427764,5427764
+0, 0, kernel-22.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1063690,1063690
+0, 0, kernel-23.trace, _Z6KernelP4NodePiPbS2_S2_S1_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1068450,1068450
+0, 0, kernel-24.trace, _Z7Kernel2PbS_S_S_i, 1954, 1, 1, 1954, 512, 1, 1, 512, 1062682,1062682
