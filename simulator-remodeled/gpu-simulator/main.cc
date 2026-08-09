@@ -143,6 +143,8 @@ int main(int argc, const char **argv) {
         // Read trace header info for window_size number of kernels
         kernel_trace_t* kernel_trace_info = tracer.parse_kernel_info(commandlist[i].command_string, m_gpgpu_sim->get_extra_trace_info());
         kernel_info = create_kernel_info(kernel_trace_info, m_gpgpu_context, &tconfig, &tracer);
+        kernel_info->set_dynamic_kernel_launch_id(
+            commandlist[i].dynamic_kernel_launch_id);
         kernels_info.push_back(kernel_info);
         std::cout << "Header info loaded for kernel command : " << commandlist[i].command_string << std::endl;
         i++;
@@ -161,6 +163,8 @@ int main(int argc, const char **argv) {
           stream_busy = true;
       }
       if (!stream_busy && m_gpgpu_sim->can_start_kernel() && !k->was_launched()) {
+        m_gpgpu_sim->configure_scheduler_for_dynamic_kernel(
+            k->get_dynamic_kernel_launch_id());
         std::cout << "launching kernel name: " << k->get_name() << " uid: " << k->get_uid() << std::endl;
         m_gpgpu_sim->launch(k);
         k->set_launched();

@@ -136,12 +136,21 @@ class trace_kernel_info_t : public kernel_info_t {
 
   void set_launched() { m_was_launched = true; }
 
+  unsigned get_dynamic_kernel_launch_id() const {
+    return m_dynamic_kernel_launch_id;
+  }
+
+  void set_dynamic_kernel_launch_id(unsigned launch_id) {
+    m_dynamic_kernel_launch_id = launch_id;
+  }
+
   trace_config *m_tconfig;
   const std::unordered_map<std::string, OpcodeChar> *OpcodeMap;
   kernel_trace_t *m_kernel_trace_info;
  private:
   trace_parser *m_parser;
   bool m_was_launched;
+  unsigned m_dynamic_kernel_launch_id;
 
   friend class trace_shd_warp_t;
 };

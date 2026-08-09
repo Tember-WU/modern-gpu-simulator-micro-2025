@@ -55,6 +55,18 @@ Subcore::Subcore(unsigned subcore_id, const shader_core_config *config,
                         m_uniform_fixed_latency_rf_write_queue(config->max_size_register_file_write_queue_for_fixed_latency_instructions, "uniform_fixed_latency_rf_write_queue") {
   m_subcore_id = subcore_id;
   m_config = config;
+  // The scheduler selected for dynamic launch 1 is the scheduler that exists
+  // when the remodeled SM is initialized.  No instructions have run under the
+  // command-line fallback policy yet, so treating this as a runtime transition
+  // would incorrectly preserve the fallback policy's cold-start state.
+  const auto first_kernel_scheduler =
+      m_config->dynamic_kernel_scheduler_map.find(1);
+  if (first_kernel_scheduler != m_config->dynamic_kernel_scheduler_map.end()) {
+    m_active_scheduler = first_kernel_scheduler->second;
+  } else {
+    m_active_scheduler =
+        parse_warp_scheduler_spec(m_config->gpgpu_scheduler_string);
+  }
   m_stats = stats;
   m_sm = sm;
   m_num_warps_per_subcore =
@@ -370,10 +382,10 @@ void Subcore::issue(SM *shared_sm) {
   // bool is_any_waiting_l1c = false;
 
   modify_warp_state();
-  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
+  if (m_active_scheduler.mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
     update_two_level_active_warps(shared_sm);
   }
-  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
+  if (m_active_scheduler.mode == CONCRETE_SCHEDULER_RRR) {
     update_strict_round_robin_turn();
     m_rrr_issued_last_cycle = false;
   }
@@ -475,10 +487,10 @@ void Subcore::issue(SM *shared_sm) {
           issue_warp(shared_sm, m_ISSUE_CONTROL_latch, pI, active_mask, sm_warp_id, fu, is_fixed_latency_inst, use_traditional_scoreboarding, has_dst_regs, dst_type);
           is_issued_inst = true;
           m_greedy_pointer_issue = subcore_warp_id;
-          if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
+          if (m_active_scheduler.mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
             rotate_two_level_active_after_issue(subcore_warp_id);
           }
-          if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_RRR) {
+          if (m_active_scheduler.mode == CONCRETE_SCHEDULER_RRR) {
             m_rrr_issued_last_cycle = true;
           }
           m_num_pending_cycles_constant_cache_misses_before_switch_to_other_warp = m_config->num_const_cache_cycle_misses_before_switch_to_other_warp;
@@ -768,7 +780,7 @@ void Subcore::issue_warp(SM *shared_sm, register_set_uniptr &dispatch_latch, war
 }
 
 std::vector<unsigned int> Subcore::order_warps(SM *shared_sm, unsigned int greedy_pointer) {
-  switch (m_config->warp_scheduling_mode) {
+  switch (m_active_scheduler.mode) {
     case CONCRETE_SCHEDULER_LRR:
       return order_loose_round_robin(greedy_pointer);
     case CONCRETE_SCHEDULER_GTO:
@@ -787,7 +799,7 @@ std::vector<unsigned int> Subcore::order_warps(SM *shared_sm, unsigned int greed
       return order_greedy_then_highest_id(shared_sm, greedy_pointer);
     default:
       std::cerr << "Warp scheduler policy "
-                << static_cast<int>(m_config->warp_scheduling_mode)
+                << static_cast<int>(m_active_scheduler.mode)
                 << " is not implemented for the remodeled SM" << std::endl;
       abort();
   }
@@ -799,7 +811,7 @@ std::vector<unsigned int> Subcore::order_warps_for_fetch(
   // issue and fetch. RRR and warp-limiting are exceptions: their issue policy
   // truncates the candidate set, which can starve a warp needed for front-end
   // progress. Fetch keeps the same priority prefix but appends all warps.
-  switch (m_config->warp_scheduling_mode) {
+  switch (m_active_scheduler.mode) {
     case CONCRETE_SCHEDULER_RRR:
       return order_strict_round_robin_for_fetch();
     case CONCRETE_SCHEDULER_WARP_LIMITING:
@@ -836,13 +848,14 @@ void Subcore::initialize_two_level_active() {
   unsigned int inner_level = 0;
   unsigned int outer_level = 0;
   const int parsed =
-      sscanf(m_config->gpgpu_scheduler_string, "two_level_active:%u:%u:%u",
+      sscanf(m_active_scheduler.config_string.c_str(),
+             "two_level_active:%u:%u:%u",
              &m_two_level_max_active_warps, &inner_level, &outer_level);
 
   if (parsed != 3 || m_two_level_max_active_warps == 0 ||
       m_two_level_max_active_warps > m_warps_of_subcore.size()) {
     std::cerr << "Invalid remodeled two-level scheduler configuration: "
-              << m_config->gpgpu_scheduler_string
+              << m_active_scheduler.config_string
               << ". Expected two_level_active:<1..warps_per_subcore>:0:1"
               << std::endl;
     abort();
@@ -927,7 +940,8 @@ std::vector<unsigned int> Subcore::order_two_level_active() const {
 void Subcore::initialize_warp_limiting() {
   unsigned int prioritization = 0;
   const int parsed =
-      sscanf(m_config->gpgpu_scheduler_string, "warp_limiting:%u:%u",
+      sscanf(m_active_scheduler.config_string.c_str(),
+             "warp_limiting:%u:%u",
              &prioritization, &m_warp_limiting_limit);
 
   m_warp_limiting_prioritization =
@@ -936,7 +950,7 @@ void Subcore::initialize_warp_limiting() {
       m_warp_limiting_limit > m_config->max_warps_per_shader ||
       m_warp_limiting_prioritization != SCHEDULER_PRIORITIZATION_GTO) {
     std::cerr << "Invalid remodeled warp-limiting scheduler configuration: "
-              << m_config->gpgpu_scheduler_string
+              << m_active_scheduler.config_string
               << ". Expected warp_limiting:2:<1..max_warps_per_shader>; "
                  "only GTO prioritization (2) is supported"
               << std::endl;
@@ -1333,14 +1347,23 @@ void Subcore::assign_warp_to_subcore(shd_warp_t *warp) {
 }
 
 void Subcore::finilized_warps_assignation() {
-  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
-    initialize_two_level_active();
-  }
-  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_WARP_LIMITING) {
-    initialize_warp_limiting();
-  }
-  if (m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_GTO ||
-      m_config->warp_scheduling_mode == CONCRETE_SCHEDULER_WARP_LIMITING) {
+  initialize_scheduler_cold_start_state();
+}
+
+void Subcore::set_warp_scheduler_policy(
+    const warp_scheduler_spec &spec) {
+  if (m_active_scheduler == spec) return;
+
+  // A runtime policy transition changes only the selection logic.  Preserve
+  // common physical scheduler history (the most recently issued/fetched warp)
+  // and rebuild only state owned by the policy being entered.
+  m_active_scheduler = spec;
+  initialize_active_policy_state(false);
+}
+
+void Subcore::initialize_scheduler_cold_start_state() {
+  if (m_active_scheduler.mode == CONCRETE_SCHEDULER_GTO ||
+      m_active_scheduler.mode == CONCRETE_SCHEDULER_WARP_LIMITING) {
     // Match the legacy GTO scheduler: start with the oldest local warp.
     m_greedy_pointer_issue = 0;
     m_greedy_pointer_fetch = 0;
@@ -1348,8 +1371,30 @@ void Subcore::finilized_warps_assignation() {
     m_greedy_pointer_issue = m_warps_of_subcore.size() - 1;
     m_greedy_pointer_fetch = m_warps_of_subcore.size() - 1;
   }
-  m_rrr_current_turn_warp = 0;
-  m_rrr_issued_last_cycle = false;
+
+  initialize_active_policy_state(true);
+}
+
+void Subcore::initialize_active_policy_state(bool cold_start) {
+  if (m_active_scheduler.mode == CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE) {
+    initialize_two_level_active();
+  }
+  if (m_active_scheduler.mode == CONCRETE_SCHEDULER_WARP_LIMITING) {
+    initialize_warp_limiting();
+  }
+
+  if (m_active_scheduler.mode == CONCRETE_SCHEDULER_RRR) {
+    if (cold_start) {
+      m_rrr_current_turn_warp = 0;
+    } else {
+      // Continue from the common last-issued history instead of reviving an
+      // RRR token left over from an earlier policy interval.
+      assert(!m_warps_of_subcore.empty());
+      m_rrr_current_turn_warp =
+          (m_greedy_pointer_issue + 1) % m_warps_of_subcore.size();
+    }
+    m_rrr_issued_last_cycle = false;
+  }
 }
 
 void Subcore::create_pipeline() {  

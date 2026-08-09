@@ -182,6 +182,7 @@ trace_kernel_info_t::trace_kernel_info_t(dim3 gridDim, dim3 blockDim,
   m_tconfig = config;
   m_kernel_trace_info = kernel_trace_info;
   m_was_launched = false;
+  m_dynamic_kernel_launch_id = 0;
 
   // resolve the binary version
   get_opcode_map(OpcodeMap, kernel_trace_info->binary_verion);

@@ -565,25 +565,26 @@ class gpgpu_sim_config : public power_config,
     // MOD. Begin. General parse options
     // scedulers
     // must currently occur after all inputs have been initialized.
-    std::string sched_config = m_shader_config.gpgpu_scheduler_string;
-    concrete_scheduler scheduler = NUM_CONCRETE_SCHEDULERS;
-    if (sched_config.find("lrr") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_LRR;
-    } else if (sched_config.find("two_level_active") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE;
-    } else if (sched_config.find("gthid") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_GTHID;
-    } else if (sched_config.find("gto") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_GTO;
-    } else if (sched_config.find("rrr") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_RRR;
-    } else if (sched_config.find("old") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_OLDEST_FIRST;
-    } else if (sched_config.find("warp_limiting") != std::string::npos) {
-      scheduler = CONCRETE_SCHEDULER_WARP_LIMITING;
+    const warp_scheduler_spec default_scheduler =
+        parse_warp_scheduler_spec(m_shader_config.gpgpu_scheduler_string);
+    m_shader_config.warp_scheduling_mode = default_scheduler.mode;
+    m_shader_config.dynamic_kernel_scheduler_map =
+        parse_dynamic_kernel_scheduler_map(
+            m_shader_config.dynamic_kernel_scheduler_map_string);
+    if (!m_shader_config.dynamic_kernel_scheduler_map.empty() &&
+        !m_shader_config.is_SM_remodeling_enabled) {
+      std::cerr << "-dynamic_kernel_scheduler_map currently requires "
+                   "-is_SM_remodeling_enabled 1"
+                << std::endl;
+      abort();
     }
-    assert(scheduler != NUM_CONCRETE_SCHEDULERS);
-    m_shader_config.warp_scheduling_mode = scheduler;
+    if (!m_shader_config.dynamic_kernel_scheduler_map.empty() &&
+        m_shader_config.gpgpu_concurrent_kernel_sm) {
+      std::cerr << "-dynamic_kernel_scheduler_map currently requires "
+                   "-gpgpu_concurrent_kernel_sm 0"
+                << std::endl;
+      abort();
+    }
     // MOD. End. General parse options
 
     m_shader_config.cycles_needed_for_address_calculation = ceil(m_shader_config.warp_size / m_shader_config.memory_num_scalar_units_per_subcore);
@@ -760,6 +761,7 @@ class gpgpu_sim : public gpgpu_t {
 
   std::map<std::string, address_type> *get_kernel_adresses_map() { return &m_first_pc_of_each_defined_kernel; } // MOD. Instruction addresses of different kernels have a different address request in memory
   void launch(kernel_info_t *kinfo);
+  void configure_scheduler_for_dynamic_kernel(unsigned dynamic_launch_id);
   bool can_start_kernel();
   unsigned finished_kernel();
   void set_kernel_done(kernel_info_t *kernel);

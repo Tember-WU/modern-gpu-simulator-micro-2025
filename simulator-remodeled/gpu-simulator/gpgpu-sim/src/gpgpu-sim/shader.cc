@@ -61,7 +61,10 @@
 #include <float.h>
 #include <limits.h>
 #include <string.h>
+#include <cctype>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include "../../libcuda/gpgpu_context.h"
 #include "../cuda-sim/cuda-sim.h"
 #include "../cuda-sim/ptx-stats.h"
@@ -87,6 +90,90 @@
 #define PRIORITIZE_MSHR_OVER_WB 1
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+namespace {
+
+std::string trim_scheduler_config(const std::string &value) {
+  std::string::size_type first = 0;
+  while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first]))) {
+    ++first;
+  }
+  std::string::size_type last = value.size();
+  while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1]))) {
+    --last;
+  }
+  return value.substr(first, last - first);
+}
+
+[[noreturn]] void invalid_scheduler_config(const std::string &message) {
+  std::cerr << "Invalid warp scheduler configuration: " << message
+            << std::endl;
+  abort();
+}
+
+}  // namespace
+
+warp_scheduler_spec parse_warp_scheduler_spec(const std::string &config) {
+  const std::string value = trim_scheduler_config(config);
+  concrete_scheduler mode = NUM_CONCRETE_SCHEDULERS;
+
+  if (value == "lrr") {
+    mode = CONCRETE_SCHEDULER_LRR;
+  } else if (value.rfind("two_level_active", 0) == 0) {
+    mode = CONCRETE_SCHEDULER_TWO_LEVEL_ACTIVE;
+  } else if (value == "gthid") {
+    mode = CONCRETE_SCHEDULER_GTHID;
+  } else if (value == "gto") {
+    mode = CONCRETE_SCHEDULER_GTO;
+  } else if (value == "rrr") {
+    mode = CONCRETE_SCHEDULER_RRR;
+  } else if (value == "old" || value == "oldest") {
+    mode = CONCRETE_SCHEDULER_OLDEST_FIRST;
+  } else if (value.compare(0, 13, "warp_limiting") == 0) {
+    mode = CONCRETE_SCHEDULER_WARP_LIMITING;
+  } else {
+    invalid_scheduler_config("unknown policy '" + value + "'");
+  }
+
+  return {mode, value};
+}
+
+std::map<unsigned, warp_scheduler_spec> parse_dynamic_kernel_scheduler_map(const std::string &config) {
+  std::map<unsigned, warp_scheduler_spec> result;
+  const std::string value = trim_scheduler_config(config);
+  if (value.empty()) return result;
+
+  std::stringstream entries(value);
+  std::string entry;
+  while (std::getline(entries, entry, ';')) {
+    entry = trim_scheduler_config(entry);
+    if (entry.empty()) continue;
+
+    const std::string::size_type separator = entry.find('=');
+    if (separator == std::string::npos || entry.find('=', separator + 1) != std::string::npos) {
+      invalid_scheduler_config("expected <dynamic_launch_id>=<policy> in '" + entry + "'");
+    }
+
+    const std::string launch_id_text =
+        trim_scheduler_config(entry.substr(0, separator));
+    const std::string policy_text =
+        trim_scheduler_config(entry.substr(separator + 1));
+    char *end = nullptr;
+    const unsigned long parsed_id =
+        strtoul(launch_id_text.c_str(), &end, 10);
+    if (launch_id_text.empty() || *end != '\0' || parsed_id == 0 ||
+        parsed_id > std::numeric_limits<unsigned>::max()) {
+      invalid_scheduler_config("invalid dynamic launch id '" + launch_id_text + "'");
+    }
+
+    const unsigned launch_id = static_cast<unsigned>(parsed_id);
+    if (result.count(launch_id) != 0) {
+      invalid_scheduler_config("duplicate dynamic launch id " + launch_id_text);
+    }
+    result.emplace(launch_id, parse_warp_scheduler_spec(policy_text));
+  }
+  return result;
+}
 
 mem_fetch *shader_core_mem_fetch_allocator::alloc(
     new_addr_type addr, mem_access_type type, unsigned size, bool wr,
@@ -4509,6 +4596,13 @@ void simt_core_cluster::core_cycle() {
   if (m_config->simt_core_sim_order == 1) {
     m_core_sim_order.splice(m_core_sim_order.end(), m_core_sim_order,
                             m_core_sim_order.begin());
+  }
+}
+
+void simt_core_cluster::set_warp_scheduler_policy(const warp_scheduler_spec &spec) {
+  assert(m_config->is_SM_remodeling_enabled);
+  for (shader_core_ctx_wrapper *core : m_core) {
+    static_cast<SM *>(core)->set_warp_scheduler_policy(spec);
   }
 }
 

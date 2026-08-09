@@ -153,6 +153,7 @@ class SM : public core_t, public shader_core_ctx_wrapper {
   void num_cycles_to_stall_SM(unsigned int num_cycles);
 
   void cycle() override;
+  void set_warp_scheduler_policy(const warp_scheduler_spec &spec);
 
   void consume_pending_wait_barrier_actions(std::stack<Wait_Barrier_Entry_Modifier> &actions);
   void add_pending_wait_barrier_decrement(warp_inst_t *inst, Wait_Barrier_Type barrier_type, unsigned int barrier_id);

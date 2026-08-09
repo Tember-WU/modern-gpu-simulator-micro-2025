@@ -343,6 +343,7 @@ std::vector<trace_command> trace_parser::parse_commandlist_file() {
         is_pushed = true;
       } else if(command.command_string.substr(0, 6) == "kernel") {
         command.m_type = command_type::kernel_launch;
+        command.dynamic_kernel_launch_id = kernel_id;
         if(kernel_id >= m_kernel_id_filter_start && kernel_id <= m_kernel_id_filter_end) {
           is_pushed = true;
         }

@@ -74,6 +74,7 @@ class Subcore {
                  bool has_dst_reg, TraceEnhancedOperandType dst_result_queue_type);
   void assign_warp_to_subcore(shd_warp_t *warp);
   void finilized_warps_assignation();
+  void set_warp_scheduler_policy(const warp_scheduler_spec &spec);
 
   void create_L0s(mem_fetch_interface *icnt_icache);
   first_level_instruction_cache* get_L0I();
@@ -101,6 +102,7 @@ class Subcore {
   unsigned int m_num_warps_per_subcore;
   unsigned int m_num_regular_rf_banks;
   const shader_core_config *m_config;
+  warp_scheduler_spec m_active_scheduler;
   shader_core_stats *m_stats;
   SM *m_sm;
 
@@ -220,6 +222,8 @@ class Subcore {
   void rotate_two_level_active_after_issue(unsigned int issued_warp);
   std::vector<unsigned int> order_two_level_active() const;
   void initialize_warp_limiting();
+  void initialize_scheduler_cold_start_state();
+  void initialize_active_policy_state(bool cold_start);
   std::vector<unsigned int> order_warp_limiting(
       unsigned int greedy_pointer) const;
   std::vector<unsigned int> order_strict_round_robin();

@@ -66,6 +66,9 @@ enum address_format { list_all = 0, base_stride = 1, base_delta = 2 };
 struct trace_command {
   std::string command_string;
   command_type m_type;
+  // One-based launch order in the complete dynamic trace.  This is distinct
+  // from the protobuf kernel id, which is local to a CUDA stream.
+  unsigned dynamic_kernel_launch_id = 0;
 };
 
 struct inst_memadd_info_t {

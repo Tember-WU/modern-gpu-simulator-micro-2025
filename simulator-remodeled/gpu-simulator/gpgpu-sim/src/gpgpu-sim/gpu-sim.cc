@@ -665,6 +665,13 @@ void shader_core_config::reg_options(class OptionParser *opp) {
       "scheduler_prioritization_type"
       "Default: gto",
       "gto");
+  option_parser_register(
+      opp, "-dynamic_kernel_scheduler_map", OPT_CSTR,
+      &dynamic_kernel_scheduler_map_string,
+      "Per-dynamic-kernel warp scheduler mapping in launch order, for example "
+      "1=gto;2=lrr. Unlisted kernels use -gpgpu_scheduler. Currently requires "
+      "the remodeled SM and concurrent kernels disabled.",
+      "");
 
   option_parser_register(
       opp, "-gpgpu_concurrent_kernel_sm", OPT_BOOL, &gpgpu_concurrent_kernel_sm,
@@ -1515,6 +1522,33 @@ void increment_x_then_y_then_z(dim3 &i, const dim3 &bound) {
       if (i.z < bound.z) i.z++;
     }
   }
+}
+
+void gpgpu_sim::configure_scheduler_for_dynamic_kernel(
+    unsigned dynamic_launch_id) {
+  if (m_shader_config->dynamic_kernel_scheduler_map.empty()) return;
+  if (dynamic_launch_id == 0) {
+    std::cerr << "Cannot select a per-kernel warp scheduler without a valid "
+                 "dynamic kernel launch id"
+              << std::endl;
+    abort();
+  }
+
+  warp_scheduler_spec spec =
+      parse_warp_scheduler_spec(m_shader_config->gpgpu_scheduler_string);
+  const auto configured =
+      m_shader_config->dynamic_kernel_scheduler_map.find(dynamic_launch_id);
+  if (configured != m_shader_config->dynamic_kernel_scheduler_map.end()) {
+    spec = configured->second;
+  }
+
+  for (unsigned cluster = 0; cluster < m_config.num_cluster(); ++cluster) {
+    m_cluster[cluster]->set_warp_scheduler_policy(spec);
+  }
+
+  std::cout << "Dynamic kernel launch " << dynamic_launch_id
+            << " uses warp scheduler policy " << spec.config_string
+            << std::endl;
 }
 
 void gpgpu_sim::launch(kernel_info_t *kinfo) {

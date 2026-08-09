@@ -270,6 +270,12 @@ void SM::cycle() {
   }
 }
 
+void SM::set_warp_scheduler_policy(const warp_scheduler_spec &spec) {
+  for (Subcore *subcore : m_subcores) {
+    subcore->set_warp_scheduler_policy(spec);
+  }
+}
+
 void SM::set_num_cycles_to_wait_to_dispatch_another_inst_from_subcore_to_sm_shared_pipeline(unsigned int num_cycles) {
   m_num_cycles_to_wait_to_dispatch_another_inst_from_subcore_to_sm_shared_pipeline = num_cycles;
 }

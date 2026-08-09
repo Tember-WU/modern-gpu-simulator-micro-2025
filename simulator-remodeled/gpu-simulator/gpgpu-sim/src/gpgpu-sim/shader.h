@@ -70,6 +70,7 @@
 #include <list>
 #include <map>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 #include <memory>
@@ -495,6 +496,21 @@ enum concrete_scheduler {
   CONCRETE_SCHEDULER_GTHID,
   NUM_CONCRETE_SCHEDULERS
 };
+
+struct warp_scheduler_spec {
+  concrete_scheduler mode;
+  std::string config_string;
+
+  bool operator==(const warp_scheduler_spec &other) const {
+    return mode == other.mode && config_string == other.config_string;
+  }
+  bool operator!=(const warp_scheduler_spec &other) const {
+    return !(*this == other);
+  }
+};
+
+warp_scheduler_spec parse_warp_scheduler_spec(const std::string &config);
+std::map<unsigned, warp_scheduler_spec> parse_dynamic_kernel_scheduler_map(const std::string &config);
 
 class scheduler_unit {  // this can be copied freely, so can be used in std
                         // containers.
@@ -1900,6 +1916,8 @@ class shader_core_config : public core_config {
       max_cta_per_core;  // Limit on number of concurrent CTAs in shader core
   unsigned max_barriers_per_cta;
   char *gpgpu_scheduler_string;
+  char *dynamic_kernel_scheduler_map_string;
+  std::map<unsigned, warp_scheduler_spec> dynamic_kernel_scheduler_map;
   unsigned gpgpu_shmem_per_block;
   unsigned gpgpu_registers_per_block;
   char *pipeline_widths_string;
@@ -3592,6 +3610,7 @@ class simt_core_cluster {
 
   void core_cycle();
   void icnt_cycle();
+  void set_warp_scheduler_policy(const warp_scheduler_spec &spec);
 
   void reinit();
   unsigned issue_block2core();
