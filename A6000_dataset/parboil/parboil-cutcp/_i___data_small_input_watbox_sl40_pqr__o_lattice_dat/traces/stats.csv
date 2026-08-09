@@ -1,0 +1,12 @@
+device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
+0, 0, kernel-1.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 47220734,47220734
+0, 0, kernel-2.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 60421429,60421429
+0, 0, kernel-3.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 71754964,71754964
+0, 0, kernel-4.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 80118074,80118074
+0, 0, kernel-5.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 81340036,81340036
+0, 0, kernel-6.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 81008557,81008557
+0, 0, kernel-7.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 80268932,80268932
+0, 0, kernel-8.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 73194892,73194892
+0, 0, kernel-9.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 62403643,62403643
+0, 0, kernel-10.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 49889610,49889610
+0, 0, kernel-11.trace, _Z37cuda_cutoff_potential_lattice6overlapiiP6float4fffPfi, 11, 11, 1, 121, 8, 2, 8, 128, 36368468,36368468
