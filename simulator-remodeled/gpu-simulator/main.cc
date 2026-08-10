@@ -164,7 +164,7 @@ int main(int argc, const char **argv) {
       }
       if (!stream_busy && m_gpgpu_sim->can_start_kernel() && !k->was_launched()) {
         m_gpgpu_sim->configure_scheduler_for_dynamic_kernel(
-            k->get_dynamic_kernel_launch_id());
+            k->get_dynamic_kernel_launch_id(), k);
         std::cout << "launching kernel name: " << k->get_name() << " uid: " << k->get_uid() << std::endl;
         m_gpgpu_sim->launch(k);
         k->set_launched();

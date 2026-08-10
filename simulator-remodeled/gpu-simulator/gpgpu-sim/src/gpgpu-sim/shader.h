@@ -1918,6 +1918,7 @@ class shader_core_config : public core_config {
   char *gpgpu_scheduler_string;
   char *dynamic_kernel_scheduler_map_string;
   std::map<unsigned, warp_scheduler_spec> dynamic_kernel_scheduler_map;
+  unsigned dynamic_kernel_scheduler_switch_cycle;
   unsigned gpgpu_shmem_per_block;
   unsigned gpgpu_registers_per_block;
   char *pipeline_widths_string;

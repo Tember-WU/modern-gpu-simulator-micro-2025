@@ -761,7 +761,8 @@ class gpgpu_sim : public gpgpu_t {
 
   std::map<std::string, address_type> *get_kernel_adresses_map() { return &m_first_pc_of_each_defined_kernel; } // MOD. Instruction addresses of different kernels have a different address request in memory
   void launch(kernel_info_t *kinfo);
-  void configure_scheduler_for_dynamic_kernel(unsigned dynamic_launch_id);
+  void configure_scheduler_for_dynamic_kernel(unsigned dynamic_launch_id,
+                                              kernel_info_t *kernel);
   bool can_start_kernel();
   unsigned finished_kernel();
   void set_kernel_done(kernel_info_t *kernel);
@@ -872,6 +873,9 @@ class gpgpu_sim : public gpgpu_t {
   // clocks
   void reinit_clock_domains(void);
   int next_clock_domain(void);
+  void set_warp_scheduler_policy_on_all_clusters(
+      const warp_scheduler_spec &spec);
+  void maybe_switch_dynamic_kernel_scheduler();
   void issue_block2core();
   void print_dram_stats(FILE *fout) const;
   void shader_print_runtime_stat(FILE *fout);
@@ -896,6 +900,11 @@ class gpgpu_sim : public gpgpu_t {
 
   std::vector<kernel_info_t *> m_running_kernels;
   unsigned m_last_issued_kernel;
+
+  kernel_info_t *m_scheduler_phase_kernel;
+  unsigned m_scheduler_phase_dynamic_launch_id;
+  warp_scheduler_spec m_scheduler_phase_target_policy;
+  bool m_scheduler_phase_switched;
 
   std::list<unsigned> m_finished_kernel;
   std::map<unsigned int, grid_barrier_status> m_grid_barrier_status;

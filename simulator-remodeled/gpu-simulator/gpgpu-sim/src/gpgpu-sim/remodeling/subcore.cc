@@ -55,13 +55,14 @@ Subcore::Subcore(unsigned subcore_id, const shader_core_config *config,
                         m_uniform_fixed_latency_rf_write_queue(config->max_size_register_file_write_queue_for_fixed_latency_instructions, "uniform_fixed_latency_rf_write_queue") {
   m_subcore_id = subcore_id;
   m_config = config;
-  // The scheduler selected for dynamic launch 1 is the scheduler that exists
-  // when the remodeled SM is initialized.  No instructions have run under the
-  // command-line fallback policy yet, so treating this as a runtime transition
-  // would incorrectly preserve the fallback policy's cold-start state.
+  // Immediate mode cold-starts with the scheduler selected for dynamic launch
+  // 1 because the command-line fallback has not executed any instructions.
+  // Phased mode instead cold-starts with the command-line policy; every kernel
+  // deliberately runs that policy before its mapped transition.
   const auto first_kernel_scheduler =
       m_config->dynamic_kernel_scheduler_map.find(1);
-  if (first_kernel_scheduler != m_config->dynamic_kernel_scheduler_map.end()) {
+  if (m_config->dynamic_kernel_scheduler_switch_cycle == 0 &&
+      first_kernel_scheduler != m_config->dynamic_kernel_scheduler_map.end()) {
     m_active_scheduler = first_kernel_scheduler->second;
   } else {
     m_active_scheduler =

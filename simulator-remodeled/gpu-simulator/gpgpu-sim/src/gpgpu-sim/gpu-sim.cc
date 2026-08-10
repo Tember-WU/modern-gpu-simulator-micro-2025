@@ -672,6 +672,14 @@ void shader_core_config::reg_options(class OptionParser *opp) {
       "1=gto;2=lrr. Unlisted kernels use -gpgpu_scheduler. Currently requires "
       "the remodeled SM and concurrent kernels disabled.",
       "");
+  option_parser_register(
+      opp, "-dynamic_kernel_scheduler_switch_cycle", OPT_UINT32,
+      &dynamic_kernel_scheduler_switch_cycle,
+      "Number of kernel execution core cycles to run with -gpgpu_scheduler "
+      "before switching to the policy in -dynamic_kernel_scheduler_map. "
+      "Launch latency is excluded. Zero preserves immediate per-kernel "
+      "switching (default=0).",
+      "0");
 
   option_parser_register(
       opp, "-gpgpu_concurrent_kernel_sm", OPT_BOOL, &gpgpu_concurrent_kernel_sm,
@@ -1524,31 +1532,96 @@ void increment_x_then_y_then_z(dim3 &i, const dim3 &bound) {
   }
 }
 
+void gpgpu_sim::set_warp_scheduler_policy_on_all_clusters(
+    const warp_scheduler_spec &spec) {
+  for (unsigned cluster = 0; cluster < m_config.num_cluster(); ++cluster) {
+    m_cluster[cluster]->set_warp_scheduler_policy(spec);
+  }
+}
+
 void gpgpu_sim::configure_scheduler_for_dynamic_kernel(
-    unsigned dynamic_launch_id) {
+    unsigned dynamic_launch_id, kernel_info_t *kernel) {
   if (m_shader_config->dynamic_kernel_scheduler_map.empty()) return;
-  if (dynamic_launch_id == 0) {
+  if (dynamic_launch_id == 0 || kernel == nullptr) {
     std::cerr << "Cannot select a per-kernel warp scheduler without a valid "
-                 "dynamic kernel launch id"
+                 "dynamic kernel launch id and kernel"
               << std::endl;
     abort();
   }
 
-  warp_scheduler_spec spec =
+  const warp_scheduler_spec default_spec =
       parse_warp_scheduler_spec(m_shader_config->gpgpu_scheduler_string);
+  warp_scheduler_spec target_spec = default_spec;
   const auto configured =
       m_shader_config->dynamic_kernel_scheduler_map.find(dynamic_launch_id);
   if (configured != m_shader_config->dynamic_kernel_scheduler_map.end()) {
-    spec = configured->second;
+    target_spec = configured->second;
   }
 
-  for (unsigned cluster = 0; cluster < m_config.num_cluster(); ++cluster) {
-    m_cluster[cluster]->set_warp_scheduler_policy(spec);
+  if (m_shader_config->dynamic_kernel_scheduler_switch_cycle == 0) {
+    m_scheduler_phase_kernel = nullptr;
+    m_scheduler_phase_dynamic_launch_id = 0;
+    m_scheduler_phase_target_policy = target_spec;
+    m_scheduler_phase_switched = true;
+    set_warp_scheduler_policy_on_all_clusters(target_spec);
+
+    std::cout << "Dynamic kernel launch " << dynamic_launch_id
+              << " uses warp scheduler policy " << target_spec.config_string
+              << std::endl;
+    return;
   }
+
+  set_warp_scheduler_policy_on_all_clusters(default_spec);
+  m_scheduler_phase_kernel = kernel;
+  m_scheduler_phase_dynamic_launch_id = dynamic_launch_id;
+  m_scheduler_phase_target_policy = target_spec;
+  m_scheduler_phase_switched = (target_spec == default_spec);
 
   std::cout << "Dynamic kernel launch " << dynamic_launch_id
-            << " uses warp scheduler policy " << spec.config_string
-            << std::endl;
+            << " starts with warp scheduler policy "
+            << default_spec.config_string;
+  if (m_scheduler_phase_switched) {
+    std::cout << " for its entire execution";
+  } else {
+    std::cout << " and will switch to " << target_spec.config_string
+              << " after "
+              << m_shader_config->dynamic_kernel_scheduler_switch_cycle
+              << " execution core cycles";
+  }
+  std::cout << std::endl;
+}
+
+void gpgpu_sim::maybe_switch_dynamic_kernel_scheduler() {
+  if (m_shader_config->dynamic_kernel_scheduler_switch_cycle == 0 ||
+      m_scheduler_phase_kernel == nullptr || m_scheduler_phase_switched) {
+    return;
+  }
+
+  const unsigned kernel_uid = m_scheduler_phase_kernel->get_uid();
+  if (std::find(m_executed_kernel_uids.begin(), m_executed_kernel_uids.end(),
+                kernel_uid) == m_executed_kernel_uids.end()) {
+    // Kernel launch latency is still being consumed and no CTA has been
+    // selected for execution yet.
+    return;
+  }
+
+  const unsigned long long current_cycle = get_current_gpu_cycle();
+  assert(current_cycle >= m_scheduler_phase_kernel->start_cycle);
+  const unsigned long long execution_cycles =
+      current_cycle - m_scheduler_phase_kernel->start_cycle;
+  if (execution_cycles <
+      m_shader_config->dynamic_kernel_scheduler_switch_cycle) {
+    return;
+  }
+
+  set_warp_scheduler_policy_on_all_clusters(
+      m_scheduler_phase_target_policy);
+  m_scheduler_phase_switched = true;
+  std::cout << "Dynamic kernel launch "
+            << m_scheduler_phase_dynamic_launch_id
+            << " switches to warp scheduler policy "
+            << m_scheduler_phase_target_policy.config_string << " after "
+            << execution_cycles << " execution core cycles" << std::endl;
 }
 
 void gpgpu_sim::launch(kernel_info_t *kinfo) {
@@ -1668,6 +1741,11 @@ unsigned gpgpu_sim::finished_kernel() {
 
 void gpgpu_sim::set_kernel_done(kernel_info_t *kernel) {
   unsigned uid = kernel->get_uid();
+  if (m_scheduler_phase_kernel == kernel) {
+    m_scheduler_phase_kernel = nullptr;
+    m_scheduler_phase_dynamic_launch_id = 0;
+    m_scheduler_phase_switched = true;
+  }
   m_grid_barrier_status.erase(uid);
   m_finished_kernel.push_back(uid);
   std::vector<kernel_info_t *>::iterator k;
@@ -1708,6 +1786,11 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   gpgpu_ctx = ctx;
   m_shader_config = &m_config.m_shader_config;
   m_memory_config = &m_config.m_memory_config;
+  m_scheduler_phase_kernel = nullptr;
+  m_scheduler_phase_dynamic_launch_id = 0;
+  m_scheduler_phase_target_policy =
+      parse_warp_scheduler_spec(m_shader_config->gpgpu_scheduler_string);
+  m_scheduler_phase_switched = true;
   ctx->ptx_parser->set_ptx_warp_size(m_shader_config);
   ptx_file_line_stats_create_exposed_latency_tracker(m_config.num_shader());
 
@@ -2868,6 +2951,11 @@ void gpgpu_sim::decrease_num_threads_kernel(unsigned kernel_id, unsigned num_thr
 void gpgpu_sim::cycle() {
   m_active_sms_this_cycle = 0;
   m_current_cycle_clock_mask = next_clock_domain();
+  if (m_current_cycle_clock_mask & CORE) {
+    // Change every remodeled SM at one well-defined core-cycle boundary,
+    // before the parallel cluster/core loops observe the active policy.
+    maybe_switch_dynamic_kernel_scheduler();
+  }
   if (m_current_cycle_clock_mask & CORE) {
     // shader core loading (pop from ICNT into core) follows CORE clock
     for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
