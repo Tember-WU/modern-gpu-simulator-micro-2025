@@ -1,5 +1,0 @@
-device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
-0, 0, kernel-1.trace, _Z17ComputePhiMag_GPUPfS_S_i, 6, 1, 1, 6, 512, 1, 1, 512, 3456,3456
-0, 0, kernel-2.trace, _Z12ComputeQ_GPUiiPfS_S_S_S_, 128, 1, 1, 128, 256, 1, 1, 256, 42000384,42000384
-0, 0, kernel-3.trace, _Z12ComputeQ_GPUiiPfS_S_S_S_, 128, 1, 1, 128, 256, 1, 1, 256, 42000384,42000384
-0, 0, kernel-4.trace, _Z12ComputeQ_GPUiiPfS_S_S_S_, 128, 1, 1, 128, 256, 1, 1, 256, 42000384,42000384

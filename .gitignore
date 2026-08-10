@@ -1,0 +1,3 @@
+# Large local GPU benchmark datasets and generated trace archives.
+# The leading slash limits this rule to the repository root.
+/A6000_dataset/

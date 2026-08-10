@@ -1,4 +1,0 @@
-device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
-0, 0, kernel-1.trace, _Z11mb_sad_calcPtS_iiy, 44, 36, 1, 1584, 61, 1, 1, 61, 22679712,22679712
-0, 0, kernel-2.trace, _Z17larger_sad_calc_8Ptii, 11, 9, 1, 99, 32, 4, 1, 128, 536184,536184
-0, 0, kernel-3.trace, _Z18larger_sad_calc_16Ptii, 11, 9, 1, 99, 32, 1, 1, 32, 134640,134640

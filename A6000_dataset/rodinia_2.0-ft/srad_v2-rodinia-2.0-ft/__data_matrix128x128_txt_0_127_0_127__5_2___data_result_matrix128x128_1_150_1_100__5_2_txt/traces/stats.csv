@@ -1,5 +1,0 @@
-device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
-0, 0, kernel-1.trace, _Z11srad_cuda_1PfS_S_S_S_S_iif, 8, 8, 1, 64, 16, 16, 1, 256, 275136,275136
-0, 0, kernel-2.trace, _Z11srad_cuda_2PfS_S_S_S_S_iiff, 8, 8, 1, 64, 16, 16, 1, 256, 112704,112704
-0, 0, kernel-3.trace, _Z11srad_cuda_1PfS_S_S_S_S_iif, 8, 8, 1, 64, 16, 16, 1, 256, 275136,275136
-0, 0, kernel-4.trace, _Z11srad_cuda_2PfS_S_S_S_S_iiff, 8, 8, 1, 64, 16, 16, 1, 256, 112704,112704
