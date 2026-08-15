@@ -103,6 +103,7 @@ void sssp(foru *hdist, foru *dist, Graph &graph, long unsigned totalcommu)
 	unsigned int NBLOCKS, FACTOR = 128;
 	bool *changed;
 	int iteration = 0;
+	const int trace_max_iterations = lonestar_trace_max_iterations();
 	Worklist inwl, outwl, *inwlptr, *outwlptr, *tmp;
 	unsigned *nerr, hnerr;
 
@@ -177,7 +178,11 @@ void sssp(foru *hdist, foru *dist, Graph &graph, long unsigned totalcommu)
 		outwlptr->clearHost();	// clear it whether overflow or not.
 		//printf("\tcleared: inwlsz=%d, outwlsz=%d.\n", inwlptr->getSize(), outwlptr->getSize());
 		//getchar();
-	} while (wlsz);
+	} while (wlsz && (trace_max_iterations == 0 || iteration < trace_max_iterations));
+	if (wlsz && trace_max_iterations > 0 && iteration >= trace_max_iterations) {
+		lonestar_trace_iteration_limit_reached = true;
+		printf("trace iteration limit reached at %d iterations.\n", iteration);
+	}
 	endtime = rtclock();
 	
 	printf("\titerations = %d.\n", iteration);

@@ -95,11 +95,16 @@ int main(int argc, char *argv[]) {
 
 	cudaMemcpy(nerr, &intzero, sizeof(intzero), cudaMemcpyHostToDevice);
 	kconf.setMaxThreadsPerBlock();
-	printf("verifying.\n");
-	dverifysolution<<<kconf.getNumberOfBlocks(), kconf.getNumberOfBlockThreads()>>> (dist, graph, nerr);
-	CudaTest("dverifysolution failed");
-	cudaMemcpy(&hnerr, nerr, sizeof(hnerr), cudaMemcpyDeviceToHost);
-	printf("\tno of errors = %d.\n", hnerr);
+	if (lonestar_trace_iteration_limit_reached || lonestar_trace_skip_verification()) {
+		printf("skipping GPU verification for trace generation%s.\n",
+		       lonestar_trace_iteration_limit_reached ? " (iteration limit reached)" : "");
+	} else {
+		printf("verifying.\n");
+		dverifysolution<<<kconf.getNumberOfBlocks(), kconf.getNumberOfBlockThreads()>>> (dist, graph, nerr);
+		CudaTest("dverifysolution failed");
+		cudaMemcpy(&hnerr, nerr, sizeof(hnerr), cudaMemcpyDeviceToHost);
+		printf("\tno of errors = %d.\n", hnerr);
+	}
 	
 	print_output("sssp-output.txt", hdist, dist, graph);
 	// cleanup left to the OS.

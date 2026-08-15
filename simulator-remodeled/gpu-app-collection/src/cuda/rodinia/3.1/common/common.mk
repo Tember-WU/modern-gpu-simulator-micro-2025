@@ -20,8 +20,15 @@
 
 .SUFFIXES : .cu .cu_dbg.o .c_dbg.o .cpp_dbg.o .cu_rel.o .c_rel.o .cpp_rel.o .cubin .ptx
 
-INCLUDES += -I$(NVIDIA_COMPUTE_SDK_LOCATION)/../4.2/C/common/inc
-ADDITIONAL_LIBS := -L$(NVIDIA_COMPUTE_SDK_LOCATION)/../4.2/C/lib -lcutil_x86_64
+# CUDA 5 and newer no longer ship the legacy cutil library.  The version-aware
+# logic below already adds cutil only for toolkits that need it, so do not add
+# an unconditional CUDA SDK 4.2 dependency here.
+
+# Rodinia carries the CUDA sample helper headers used by CFD and hybridsort.
+# Use that in-tree copy instead of expecting a separately installed legacy SDK.
+RODINIA_COMMON_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+RODINIA_HELPER_DIR := $(abspath $(RODINIA_COMMON_DIR)/../cuda/hybridsort)
+INCLUDES += -I$(RODINIA_HELPER_DIR)
 
 # Add new SM Versions here as devices with new Compute Capability are released
 SM_VERSIONS   := 10 11 12 13 20 21 30 50 60 62 70 75
@@ -520,4 +527,3 @@ clobber : clean
 	$(VERBOSE)rm -rf $(SHAREDDIR)/lib/*.a
 	$(VERBOSE)rm -rf $(COMMONDIR)/obj
 	$(VERBOSE)rm -rf $(SHAREDDIR)/obj
-

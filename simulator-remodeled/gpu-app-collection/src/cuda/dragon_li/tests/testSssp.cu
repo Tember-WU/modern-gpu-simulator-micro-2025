@@ -60,7 +60,8 @@ int main(int argc, char **argv) {
 				256, 						//THREADS
 				104,						//CTAS
 				5,							//CDP_THREADS_BITS
-				32							//CDP_THRESHOLD
+				256						//CDP_THRESHOLD; keeps coPapers below the
+											//131072 pending child-launch limit
 				> _Settings;
 
 

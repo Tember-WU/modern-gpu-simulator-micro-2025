@@ -42,8 +42,11 @@ CCFILES		:=
 
 GPGPUSIM_ROOT  ?= ../../..
 
+# Modern CUDA toolkits no longer ship the CUDA SDK cutil library, and LULESH
+# does not use its API.
+OMIT_CUTIL_LIB := 1
+
 ################################################################################
 # Rules and targets
 
 include ../../common/common.mk
-

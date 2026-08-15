@@ -127,11 +127,16 @@ int main(int argc, char *argv[]) {
 
 	kconf.setProblemSize(graph.nnodes);
 	kconf.setMaxThreadsPerBlock();
-	printf("verifying.\n");
-	dverifysolution<<<kconf.getNumberOfBlocks(), kconf.getNumberOfBlockThreads()>>> (dist, graph, nerr);
-	CudaTest("dverifysolution failed");
-	CUDA_SAFE_CALL(cudaMemcpy(&hnerr, nerr, sizeof(hnerr), cudaMemcpyDeviceToHost));
-	printf("\tno of errors = %d.\n", hnerr);
+	if (lonestar_trace_iteration_limit_reached || lonestar_trace_skip_verification()) {
+		printf("skipping GPU verification for trace generation%s.\n",
+		       lonestar_trace_iteration_limit_reached ? " (iteration limit reached)" : "");
+	} else {
+		printf("verifying.\n");
+		dverifysolution<<<kconf.getNumberOfBlocks(), kconf.getNumberOfBlockThreads()>>> (dist, graph, nerr);
+		CudaTest("dverifysolution failed");
+		CUDA_SAFE_CALL(cudaMemcpy(&hnerr, nerr, sizeof(hnerr), cudaMemcpyDeviceToHost));
+		printf("\tno of errors = %d.\n", hnerr);
+	}
 
 	write_solution("bfs-output.txt", graph, dist);
 

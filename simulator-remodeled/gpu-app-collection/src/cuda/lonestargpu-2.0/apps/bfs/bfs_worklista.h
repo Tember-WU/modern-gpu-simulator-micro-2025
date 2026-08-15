@@ -164,6 +164,7 @@ void bfs(Graph &graph, foru *dist)
 	unsigned int NBLOCKS, FACTOR = 128;
 	bool *changed;
 	int iteration = 0;
+	const int trace_max_iterations = lonestar_trace_max_iterations();
 	unsigned *nerr, hnerr;
 
 	double starttime, endtime;
@@ -230,7 +231,11 @@ void bfs(Graph &graph, foru *dist)
 		//outwlptr->printHost();
 		CUDA_SAFE_CALL(cudaMemcpy(&hnerr, nerr, sizeof(hnerr), cudaMemcpyDeviceToHost));
 		//wlsz = outwlptr->getSize();
-	} while (hnerr); // hnerr is actually not_done
+	} while (hnerr && (trace_max_iterations == 0 || iteration < trace_max_iterations)); // hnerr is actually not_done
+	if (hnerr && trace_max_iterations > 0 && iteration >= trace_max_iterations) {
+		lonestar_trace_iteration_limit_reached = true;
+		printf("trace iteration limit reached at %d iterations.\n", iteration);
+	}
 	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 	endtime = rtclock();
 	

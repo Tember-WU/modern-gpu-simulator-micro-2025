@@ -57,11 +57,11 @@ void init_arrays(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz)
 }
 
 
-void runFdtd(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz)
+void runFdtd(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz, int iteration_count)
 {
 	int t, i, j;
 	
-	for (t=0; t < tmax; t++)  
+	for (t=0; t < iteration_count; t++)
 	{
 		for (j=0; j < NY; j++)
 		{
@@ -170,7 +170,7 @@ __global__ void fdtd_step3_kernel(DATA_TYPE *ex, DATA_TYPE *ey, DATA_TYPE *hz, i
 }
 
 
-void fdtdCuda(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz, DATA_TYPE* hz_outputFromGpu)
+void fdtdCuda(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz, DATA_TYPE* hz_outputFromGpu, int iteration_count)
 {
 	double t_start, t_end;
 
@@ -194,7 +194,7 @@ void fdtdCuda(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz, DA
 
 	t_start = rtclock();
 
-	for(int t = 0; t< tmax; t++)
+	for(int t = 0; t < iteration_count; t++)
 	{
 		fdtd_step1_kernel<<<grid,block>>>(_fict_gpu, ex_gpu, ey_gpu, hz_gpu, t);
 		cudaThreadSynchronize();
@@ -219,6 +219,15 @@ void fdtdCuda(DATA_TYPE* _fict_, DATA_TYPE* ex, DATA_TYPE* ey, DATA_TYPE* hz, DA
 int main()
 {
 	double t_start, t_end;
+	int iteration_count = tmax;
+	const char* iteration_env = getenv("POLYBENCH_FDTD_ITERATIONS");
+	if (iteration_env != NULL)
+	{
+		int requested = atoi(iteration_env);
+		if (requested > 0 && requested <= tmax)
+			iteration_count = requested;
+	}
+	printf("FDTD iterations: %d (maximum %d)\n", iteration_count, tmax);
 
 	DATA_TYPE* _fict_;
 	DATA_TYPE* ex;
@@ -235,10 +244,10 @@ int main()
 	init_arrays(_fict_, ex, ey, hz);
 
 	GPU_argv_init();
-	fdtdCuda(_fict_, ex, ey, hz, hz_outputFromGpu);
+	fdtdCuda(_fict_, ex, ey, hz, hz_outputFromGpu, iteration_count);
 
 	t_start = rtclock();
-	runFdtd(_fict_, ex, ey, hz);
+	runFdtd(_fict_, ex, ey, hz, iteration_count);
 	t_end = rtclock();
 	
 	fprintf(stdout, "CPU Runtime: %0.6lfs\n", t_end - t_start);
@@ -253,4 +262,3 @@ int main()
 
 	return 0;
 }
-

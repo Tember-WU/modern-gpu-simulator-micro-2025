@@ -151,6 +151,11 @@ int dynamic_kernel_limit_end = 0; // 0 means no limit
 enum address_format { list_all = 0, base_stride = 1, base_delta = 2 };
 
 int binary_version;
+// A single CUDA process can launch kernels from cubins compiled for different
+// architectures (for example, DeepBench launches local sm_86 helper kernels
+// and sm_80 kernels from statically linked cuBLAS).  Keep every architecture
+// observed during this run instead of letting the last launch win.
+std::set<int> observed_binary_versions;
 std::vector<int> kernel_id;
 std::vector<int> current_stream_id;
 
@@ -173,13 +178,14 @@ struct traced_operand_instrument {
 };
 
 struct traced_kernel_id {
-  traced_kernel_id(std::string kernel_name, unsigned int variant_id, unsigned int candidate_unique_function_id,std::map<int, std::string> key_instructions_by_pc, std::map<int, std::string> call_or_ret_by_pc, uint64_t func_addr) {
+  traced_kernel_id(std::string kernel_name, unsigned int variant_id, unsigned int candidate_unique_function_id,std::map<int, std::string> key_instructions_by_pc, std::map<int, std::string> call_or_ret_by_pc, uint64_t func_addr, unsigned int architecture_version) {
     this->original_kernel_name = kernel_name;
     this->variant_id = variant_id;
     this->unique_function_id = candidate_unique_function_id;
     this->key_instructions_by_pc = key_instructions_by_pc;
     this->call_or_ret_by_pc = call_or_ret_by_pc;
     this->func_addr = func_addr;
+    this->architecture_version = architecture_version;
     sass_has_been_parsed = false;
     rfu_has_been_parsed = false;
   }
@@ -191,6 +197,7 @@ struct traced_kernel_id {
   std::map<int, std::string> key_instructions_by_pc;
   std::map<int, std::string> call_or_ret_by_pc;
   uint64_t func_addr;
+  unsigned int architecture_version;
 };
 
 // This structures are used to uniquely identify kernels. Some of them have the same name, even that they have different code
@@ -268,14 +275,31 @@ void remove_folder(const char * folder_path) {
   std::filesystem::remove_all(folder_path);
 }
 
+std::string strip_trace_line(const std::string &line) {
+  // nvdisasm pads CUTLASS RFU lines to several thousand characters.  Four
+  // full-string ReplaceAll passes made those files disproportionately slow
+  // to parse, so perform the same substitutions in one linear pass.
+  std::string clear_line;
+  clear_line.reserve(line.size());
+  for (size_t i = 0; i < line.size(); ++i) {
+    if (i + 1 < line.size() &&
+        ((line[i] == '/' && line[i + 1] == '*') ||
+         (line[i] == '*' && line[i + 1] == '/'))) {
+      clear_line.push_back(' ');
+      ++i;
+    } else if (line[i] == ',' || line[i] == ';') {
+      clear_line.push_back(' ');
+    } else {
+      clear_line.push_back(line[i]);
+    }
+  }
+  return strip_string(clear_line);
+}
+
 std::string read_stripped_line(std::ifstream &ifs) {
   std::string line;
   std::getline(ifs, line);
-  std::string clear_line = ReplaceAll(line, "/*", " ");
-  clear_line = ReplaceAll(clear_line, "*/", " ");
-  clear_line = ReplaceAll(clear_line, ",", " ");
-  clear_line = ReplaceAll(clear_line, ";", " ");
-  return strip_string(clear_line);
+  return strip_trace_line(line);
 }
 
 std::string getEnclosedSubstring(std::string str) {
@@ -299,10 +323,16 @@ std::regex transRegex("\\s*\\?[A-Za-z0-9_]+");
 
 std::string replaceInstructionNewExtraInformation(std::string original_sass_string) {
   std::string transformed = original_sass_string;
-  transformed = std::regex_replace(transformed, reqRegex, "");
-  transformed = std::regex_replace(transformed, wrRegex, "");
-  transformed = std::regex_replace(transformed, rdRegex, "");
-  transformed = std::regex_replace(transformed, transRegex, "");
+  // Avoid invoking the regex engine for annotations that are not present.
+  // This matters for nvdisasm's very long, space-padded CUTLASS lines.
+  if (transformed.find("&req={") != std::string::npos)
+    transformed = std::regex_replace(transformed, reqRegex, "");
+  if (transformed.find("&wr=0x") != std::string::npos)
+    transformed = std::regex_replace(transformed, wrRegex, "");
+  if (transformed.find("&rd=0x") != std::string::npos)
+    transformed = std::regex_replace(transformed, rdRegex, "");
+  if (transformed.find('?') != std::string::npos)
+    transformed = std::regex_replace(transformed, transRegex, "");
   return transformed;
 }
 
@@ -372,6 +402,7 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
   }
   
   bool is_starting_reading_kernel = false;
+  bool is_relevant_kernel = false;
   std::string kernel_name = "";
   traced_kernel *current_traced_kernel = nullptr;
   std::map<int, std::string> full_inst_call_or_ret_by_pc;
@@ -388,7 +419,12 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
         std::vector<std::string> aux_splitted = split_string(stripped_line, ' ');
         assert(aux_splitted.size() == 3);
         kernel_name = aux_splitted[2];
-        current_traced_kernel = new traced_kernel(kernel_name, static_cast<unsigned>(binary_version));
+        is_relevant_kernel =
+            all_kernels_key_instructions_by_pc.find(kernel_name) !=
+            all_kernels_key_instructions_by_pc.end();
+        if(is_relevant_kernel) {
+          current_traced_kernel = new traced_kernel(kernel_name, static_cast<unsigned>(binary_version));
+        }
         is_starting_reading_kernel = true;
       }
     }
@@ -398,33 +434,39 @@ void parse_sass(int binary_version, const std::filesystem::directory_entry &entr
       {
         is_starting_reading_kernel = false;
 
-        // Check if the kernel was captured during the execution
-        unsigned int variant_id = 0;
-        bool has_been_traced = has_the_kernel_been_traced(kernel_name, current_traced_kernel->get_key_instructions_pcs(), full_inst_call_or_ret_by_pc, variant_id, false, false, call_or_ret_pcs_not_to_consider);
+        if(is_relevant_kernel) {
+          // Check if the kernel was captured during the execution
+          unsigned int variant_id = 0;
+          bool has_been_traced = has_the_kernel_been_traced(kernel_name, current_traced_kernel->get_key_instructions_pcs(), full_inst_call_or_ret_by_pc, variant_id, false, false, call_or_ret_pcs_not_to_consider);
 
-        if(has_been_traced) {
-          std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
-          auto it_search_funct = map_kernel_name_to_func_addr.find(kernel_name);
-          assert(it_search_funct != map_kernel_name_to_func_addr.end());
-          all_kernels_key_instructions_by_pc[kernel_name][variant_id].sass_has_been_parsed = true;
-          current_traced_kernel->set_kernel_name(final_kernel_name);
-          m_enhanced_traced_execution->add_traced_kernel(final_kernel_name, all_kernels_key_instructions_by_pc[kernel_name][variant_id].unique_function_id, current_traced_kernel, it_search_funct->second, true);
-          current_traced_kernel = nullptr;
-        }else {
-          delete current_traced_kernel;
+          if(has_been_traced) {
+            std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
+            auto it_search_funct = map_kernel_name_to_func_addr.find(kernel_name);
+            assert(it_search_funct != map_kernel_name_to_func_addr.end());
+            all_kernels_key_instructions_by_pc[kernel_name][variant_id].sass_has_been_parsed = true;
+            current_traced_kernel->set_kernel_name(final_kernel_name);
+            m_enhanced_traced_execution->add_traced_kernel(final_kernel_name, all_kernels_key_instructions_by_pc[kernel_name][variant_id].unique_function_id, current_traced_kernel, it_search_funct->second, true);
+            current_traced_kernel = nullptr;
+          }else {
+            delete current_traced_kernel;
+          }
         }
+        current_traced_kernel = nullptr;
+        is_relevant_kernel = false;
       }
       else if (stripped_line.find("headerflags") == std::string::npos)
       {
-        stripped_line = replaceInstructionNewExtraInformation(stripped_line);
-        std::vector<std::string> aux_list = split_string(stripped_line, ' ');
         std::vector<std::string> aux_list2;
         if (binary_version >= 70)
         {
           assert(!ifs_sass.eof());
           aux_list2 = split_string(read_stripped_line(ifs_sass), ' ');
         }
-        current_traced_kernel->add_instruction(aux_list, aux_list2, threshold_unique_kernel_checking, stripped_line);
+        if(is_relevant_kernel) {
+          stripped_line = replaceInstructionNewExtraInformation(stripped_line);
+          std::vector<std::string> aux_list = split_string(stripped_line, ' ');
+          current_traced_kernel->add_instruction(aux_list, aux_list2, threshold_unique_kernel_checking, stripped_line);
+        }
       }
     }
   }
@@ -519,6 +561,7 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
   
   bool is_starting_reading_kernel = false;
   bool is_code_region_started = false;
+  bool is_relevant_kernel = false;
   std::string kernel_name = "";
   std::vector<std::string> reg_order;
   std::map<int, std::string> key_instructions_by_pc;
@@ -532,7 +575,21 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
 
   while (!ifs_rfu.eof())
   {
-    std::string stripped_line = read_stripped_line(ifs_rfu);
+    std::string raw_line;
+    std::getline(ifs_rfu, raw_line);
+
+    // nvdisasm RFU output can contain tens of megabytes from hundreds of
+    // statically linked functions.  Once an untraced function's .text header
+    // has been seen, none of its instruction lines can contribute metadata.
+    // Skip those raw lines without repeated string replacement/tokenization;
+    // retain the next function/header and Legend delimiters needed by the
+    // existing state machine.
+    if(is_starting_reading_kernel && !is_relevant_kernel &&
+       raw_line.find(".text") == std::string::npos &&
+       raw_line.find("Legend:") == std::string::npos) {
+      continue;
+    }
+    std::string stripped_line = strip_trace_line(raw_line);
     
     if (!is_starting_reading_kernel)
     {
@@ -551,13 +608,16 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
       {
         is_starting_reading_kernel = false;
         is_code_region_started = false;
-        unsigned int variant_id = 0;
-        bool has_been_traced = has_the_kernel_been_traced(kernel_name, key_instructions_by_pc, full_call_or_ret_inst_by_pc, variant_id, true, true, call_or_ret_pcs_not_to_consider);
-        if(has_been_traced) {
-          std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
-          all_kernels_key_instructions_by_pc[kernel_name][variant_id].rfu_has_been_parsed = true;
-          m_enhanced_traced_execution->add_register_usage_to_a_kernel(final_kernel_name, reg_usage_by_pc, call_target_by_pc);
+        if(is_relevant_kernel) {
+          unsigned int variant_id = 0;
+          bool has_been_traced = has_the_kernel_been_traced(kernel_name, key_instructions_by_pc, full_call_or_ret_inst_by_pc, variant_id, true, true, call_or_ret_pcs_not_to_consider);
+          if(has_been_traced) {
+            std::string final_kernel_name = kernel_name + variant_delimiter_str + std::to_string(variant_id);
+            all_kernels_key_instructions_by_pc[kernel_name][variant_id].rfu_has_been_parsed = true;
+            m_enhanced_traced_execution->add_register_usage_to_a_kernel(final_kernel_name, reg_usage_by_pc, call_target_by_pc);
+          }
         }
+        is_relevant_kernel = false;
         key_instructions_by_pc.clear();
         reg_usage_by_pc.clear();
         call_target_by_pc.clear();
@@ -566,11 +626,11 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
       }else {
         std::vector<std::string> splitted_text = split_string(stripped_line, ' ');
         if(!splitted_text.empty()) {
-          if(is_code_region_started && (stripped_line.find(":") == std::string::npos) &&
+          if(is_relevant_kernel && is_code_region_started && (stripped_line.find(":") == std::string::npos) &&
             (stripped_line.find(".weak") == std::string::npos) && (stripped_line.find(".type") == std::string::npos)
             && (stripped_line.find(".size") == std::string::npos)) {
             parse_rfu_instruction_info(splitted_text, reg_order, stripped_line, key_instructions_by_pc, reg_usage_by_pc, call_target_by_pc, full_call_or_ret_inst_by_pc, call_or_ret_pcs_not_to_consider);
-          }else if( (splitted_text[0].find("0000") != std::string::npos) && (stripped_line.find("//") != std::string::npos) && (stripped_line.find(":") == std::string::npos) &&
+          }else if(is_relevant_kernel && (splitted_text[0].find("0000") != std::string::npos) && (stripped_line.find("//") != std::string::npos) && (stripped_line.find(":") == std::string::npos) &&
             (stripped_line.find(".weak") == std::string::npos) && (stripped_line.find(".type") == std::string::npos)
             && (stripped_line.find(".size") == std::string::npos)) {
             is_code_region_started = true;
@@ -578,6 +638,9 @@ void parse_rfu(const std::filesystem::directory_entry &entry) {
           }else if(splitted_text[0].find(".text") != std::string::npos) {
             kernel_name = splitted_text[0].substr(6);
             kernel_name.pop_back(); // Remove the last  : char
+            is_relevant_kernel =
+                all_kernels_key_instructions_by_pc.find(kernel_name) !=
+                all_kernels_key_instructions_by_pc.end();
           }
         }
       }
@@ -927,7 +990,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
     auto it_already_traced = all_kernels_key_instructions_by_pc.find(current_kernel_name);
     if (it_already_traced == all_kernels_key_instructions_by_pc.end())
     {
-      all_kernels_key_instructions_by_pc[current_kernel_name].push_back(traced_kernel_id(current_kernel_name, 0, next_candidate_unique_function_id, current_kernel_key_instructions_by_pc, current_kernel_call_or_ret_by_pc, addr_funct));
+      all_kernels_key_instructions_by_pc[current_kernel_name].push_back(traced_kernel_id(current_kernel_name, 0, next_candidate_unique_function_id, current_kernel_key_instructions_by_pc, current_kernel_call_or_ret_by_pc, addr_funct, binary_version));
     }
     else
     {
@@ -944,7 +1007,7 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
       if (!is_already_traced)
       {
         variant_id = it_already_traced->second.size();
-        all_kernels_key_instructions_by_pc[current_kernel_name].push_back(traced_kernel_id(current_kernel_name, it_already_traced->second.size(), next_candidate_unique_function_id, current_kernel_key_instructions_by_pc, current_kernel_call_or_ret_by_pc, addr_funct));
+        all_kernels_key_instructions_by_pc[current_kernel_name].push_back(traced_kernel_id(current_kernel_name, it_already_traced->second.size(), next_candidate_unique_function_id, current_kernel_key_instructions_by_pc, current_kernel_call_or_ret_by_pc, addr_funct, binary_version));
       }
     }
     
@@ -1063,6 +1126,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
       CUDA_SAFECALL(cuFuncGetAttribute(&binary_version,
                                        CU_FUNC_ATTRIBUTE_BINARY_VERSION, p->f));
+      observed_binary_versions.insert(binary_version);
 
       get_opcode_map(OpcodeMap, binary_version);
       instrument_function_if_needed(ctx, p->f, device_id);
@@ -1351,7 +1415,6 @@ void *recv_thread_fun(void *args) {
     if (num_recv_bytes > 0) {
       uint32_t num_processed_bytes = 0;
       dynamic_trace::cuda_stream &stream = (*gpu_dev.mutable_streams())[current_stream_id[device_id]];
-      dynamic_trace::kernel &ker = (*stream.mutable_kernels())[kernel_id[device_id]-2]; 
       while (num_processed_bytes < num_recv_bytes) {
         inst_trace_t *ma = (inst_trace_t *)&recv_buffer[num_processed_bytes];
 
@@ -1366,6 +1429,13 @@ void *recv_thread_fun(void *args) {
         while(!recv_thread_receiving[ctx]) {
           pthread_yield();
         }
+        // kernel_id is the global launch number, while stream.kernels contains
+        // only launches inside the requested capture interval.  In addition,
+        // skipped launches still send the -1 flush token handled above.  Bind
+        // the most recently captured kernel only for actual instruction data.
+        assert(stream.kernels_size() > 0);
+        dynamic_trace::kernel &ker =
+            *stream.mutable_kernels(stream.kernels_size() - 1);
         // Key: d_{device}_s_{stream}_k_{kernel}_{cta_id_x},{cta_id_y},{cta_id_z}
         std::string tb_string_id = "d_" + std::to_string(device_id) + "_s_" + std::to_string(current_stream_id[device_id]) + "_k_" + std::to_string(kernel_id[device_id]-1) + "_" + std::to_string(ma->cta_id_x) + "," +
                                    std::to_string(ma->cta_id_y) + "," +
@@ -1471,6 +1541,29 @@ int check_system_call(int system_res, const char* syscall) {
   return system_res;
 }
 
+bool cubin_contains_traced_symbol(const std::filesystem::path &cubin_file) {
+  // Symbol listing is orders of magnitude cheaper than nvdisasm for the large
+  // statically linked cuBLAS modules.  If listing itself fails, process the
+  // module conservatively so this optimization cannot hide traced code.
+  std::string command = "cuobjdump -symbols \"" + cubin_file.string() + "\" 2>/dev/null";
+  FILE *pipe = popen(command.c_str(), "r");
+  if(pipe == nullptr) return true;
+
+  bool contains_traced_symbol = false;
+  char line[8192];
+  while(!contains_traced_symbol && fgets(line, sizeof(line), pipe) != nullptr) {
+    std::string symbol_line(line);
+    for(const auto &kernel_entry : all_kernels_key_instructions_by_pc) {
+      if(symbol_line.find(kernel_entry.first) != std::string::npos) {
+        contains_traced_symbol = true;
+        break;
+      }
+    }
+  }
+  int status = pclose(pipe);
+  return status == 0 ? contains_traced_symbol : true;
+}
+
 void enhanced_tracer() {
   create_folder(extrainfo_path.c_str());
   create_folder(cubin_path.c_str());
@@ -1479,39 +1572,135 @@ void enhanced_tracer() {
   std::string program_path = get_program_path();
   std::size_t found = program_path.find_last_of("/");
   std::string program_name = program_path.substr(found + 1);
-  std::string command_get_cubin = "cd " + cubin_path + " && cuobjdump " + program_path + " -xelf all -arch=sm_" + std::to_string(binary_version);
   std::cout << "Generating extra information for the enhanced traces of benchmark: " << program_name << std::endl;
-  check_system_call(system(command_get_cubin.c_str()), command_get_cubin.c_str());
+  if(observed_binary_versions.empty()) observed_binary_versions.insert(binary_version);
+  for(int observed_binary_version : observed_binary_versions) {
+    std::string command_get_cubin = "cd " + cubin_path + " && cuobjdump " + program_path + " -xelf all -arch=sm_" + std::to_string(observed_binary_version);
+    std::cout << "Extracting cubins for observed architecture sm_"
+              << observed_binary_version << std::endl;
+    check_system_call(system(command_get_cubin.c_str()), command_get_cubin.c_str());
+  }
   m_enhanced_traced_execution = new traced_execution(program_name);
   std::string absolute_cubin_path = cwd + "/" + cubin_path;
+  std::unordered_set<std::string> processed_cubins;
+  size_t skipped_unlaunched_cubins = 0;
   for (const auto &entry : std::filesystem::directory_iterator(absolute_cubin_path))
   {
     std::string aux_cubin = entry.path().filename().string();
+    if(!cubin_contains_traced_symbol(entry.path())) {
+      skipped_unlaunched_cubins++;
+      continue;
+    }
     std::string base_name = entry.path().stem().string();
+    int cubin_binary_version = binary_version;
+    std::string cubin_filename = entry.path().filename().string();
+    std::size_t sm_position = cubin_filename.rfind(".sm_");
+    if(sm_position != std::string::npos) {
+      std::size_t version_begin = sm_position + 4;
+      std::size_t version_end = cubin_filename.find('.', version_begin);
+      try {
+        cubin_binary_version = std::stoi(
+            cubin_filename.substr(version_begin, version_end - version_begin));
+      } catch(const std::exception &) {
+        cubin_binary_version = binary_version;
+      }
+    }
     std::string command_get_register_usage = "cd " + register_usage_path + " && nvdisasm -lrm count ../cubin/" + aux_cubin + " > " + base_name + ".rfu";
     std::string command_get_sass = "cd " + sass_path + " && cuobjdump -sass ../cubin/" + aux_cubin + " > " + base_name + ".sass";
     std::cout << "Parsing cubin: " << aux_cubin << std::endl;
     int call_code_rfu = check_system_call(system(command_get_register_usage.c_str()), command_get_register_usage.c_str());
     int call_code_sass = check_system_call(system(command_get_sass.c_str()), command_get_sass.c_str());
     if(call_code_sass == 0) {
-      parse_sass(binary_version, entry);
+      parse_sass(cubin_binary_version, entry);
     }
     if(call_code_rfu == 0) {
       parse_rfu(entry);
     }
+    processed_cubins.insert(aux_cubin);
+
+    // Statically linked CUDA libraries (notably cuBLAS in DeepBench) can add
+    // hundreds of cubin modules to the executable.  Once every dynamically
+    // observed kernel variant has both SASS and register-usage metadata,
+    // disassembling the remaining, never-launched library candidates only
+    // wastes hours and can create hundreds of gigabytes of unrelated files.
+    bool all_traced_metadata_parsed = !all_kernels_key_instructions_by_pc.empty();
+    for(const auto &kernel_entry : all_kernels_key_instructions_by_pc) {
+      for(const auto &variant : kernel_entry.second) {
+        if(!variant.sass_has_been_parsed || !variant.rfu_has_been_parsed) {
+          all_traced_metadata_parsed = false;
+          break;
+        }
+      }
+      if(!all_traced_metadata_parsed) break;
+    }
+    if(all_traced_metadata_parsed) {
+      std::cout << "All traced kernel metadata found; skipping remaining "
+                << "unlaunched cubin modules" << std::endl;
+      break;
+    }
+  }
+  if(intermediate_extra_files_persistance) {
+    size_t removed_unlaunched_cubins = 0;
+    for(const auto &entry : std::filesystem::directory_iterator(absolute_cubin_path)) {
+      if(processed_cubins.find(entry.path().filename().string()) == processed_cubins.end()) {
+        if(std::filesystem::remove(entry.path())) removed_unlaunched_cubins++;
+      }
+    }
+    if(removed_unlaunched_cubins > 0) {
+      std::cout << "Removed " << removed_unlaunched_cubins
+                << " unlaunched cubin modules from retained artifacts" << std::endl;
+    }
+  }
+  if(skipped_unlaunched_cubins > 0) {
+    std::cout << "Symbol prefilter skipped " << skipped_unlaunched_cubins
+              << " unlaunched cubin modules" << std::endl;
   }
   for(auto kernel_name : all_kernels_key_instructions_by_pc) {
     for(auto variant : kernel_name.second) {
       if(!variant.sass_has_been_parsed || !variant.rfu_has_been_parsed) {
-        std::cout << "Error. Kernel " << kernel_name.first << " variant " << variant.variant_id << " has not been parsed." << std::endl;
+        std::cout << "Warning. Kernel " << kernel_name.first << " variant " << variant.variant_id << " is not fully available from an on-disk cubin." << std::endl;
         std::cout << "SASS parsed: " << variant.sass_has_been_parsed << std::endl;
         std::cout << "RFU parsed: " << variant.rfu_has_been_parsed << std::endl;
         std::cout << "Traced instructions: " << std::endl;
         print_map(variant.key_instructions_by_pc);
-        auto it_already_captured_instr = map_func_addr_to_pc_to_sass_instr.find(variant.func_addr);
-        assert(it_already_captured_instr != map_func_addr_to_pc_to_sass_instr.end());
-        std::string kernel_name_to_add = variant.original_kernel_name + variant_delimiter_str + std::to_string(variant.variant_id);
-        m_enhanced_traced_execution->add_no_binary_kernel(kernel_name_to_add, variant.unique_function_id, variant.func_addr, binary_version, it_already_captured_instr->second, false);
+        // CUDA dynamic-parallelism runtime functions can be present in SASS
+        // while nvdisasm emits no matching register-usage entry.  In that
+        // case the kernel has already been added by parse_sass(); adding it a
+        // second time as a no-binary fallback used to trigger a duplicate-name
+        // assertion.  A fallback kernel is needed only when SASS itself was
+        // unavailable.  Missing RFU alone is valid and leaves register usage
+        // unspecified for that internal runtime function.
+        if(!variant.sass_has_been_parsed) {
+          auto it_already_captured_instr = map_func_addr_to_pc_to_sass_instr.find(variant.func_addr);
+          assert(it_already_captured_instr != map_func_addr_to_pc_to_sass_instr.end());
+          std::string kernel_name_to_add = variant.original_kernel_name + variant_delimiter_str + std::to_string(variant.variant_id);
+          m_enhanced_traced_execution->add_no_binary_kernel(kernel_name_to_add, variant.unique_function_id, variant.func_addr, variant.architecture_version, it_already_captured_instr->second, false);
+
+          // Runtime/JIT-generated kernels do not have an extractable CUBIN,
+          // but NVBit captured their complete static instruction map while
+          // instrumenting the function.  Retain a standalone SASS artifact in
+          // addition to the enhanced JSON so every launched static kernel has
+          // human-readable SASS in persistent trace mode.
+          if(intermediate_extra_files_persistance) {
+            std::string fallback_sass_path = sass_path + "/jit_kernel_" +
+                std::to_string(variant.unique_function_id) + ".sm_" +
+                std::to_string(variant.architecture_version) + ".sass";
+            std::ofstream fallback_sass(fallback_sass_path, std::ios::out);
+            fallback_sass << "# Dynamic/JIT-captured SASS; no on-disk CUBIN or RFU is available\n";
+            fallback_sass << "# Function: " << kernel_name_to_add << "\n";
+            fallback_sass << "# Architecture: sm_" << variant.architecture_version << "\n";
+            for(const auto &instruction : it_already_captured_instr->second) {
+              fallback_sass << "/*" << std::hex << instruction.first << std::dec
+                            << "*/ " << instruction.second << "\n";
+            }
+            fallback_sass.close();
+            std::cout << "Retained dynamically captured SASS: "
+                      << fallback_sass_path << std::endl;
+          }
+        } else {
+          std::cout << "Warning: keeping parsed SASS without RFU for kernel "
+                    << kernel_name.first << " variant " << variant.variant_id << std::endl;
+        }
       }
     }
   }

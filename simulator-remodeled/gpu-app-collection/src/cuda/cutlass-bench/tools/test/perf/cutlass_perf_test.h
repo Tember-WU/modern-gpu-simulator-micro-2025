@@ -25,10 +25,6 @@
 
 #pragma once
 
-#pragma diag_suppress boolean_controlling_expr_is_constant
-#include <gtest/gtest.h>
-#pragma diag_warning boolean_controlling_expr_is_constant
-
 #include "tools/test/perf/testbench_output.h"
 #include "tools/test/perf/gemm/gemm_profiler.h"
 

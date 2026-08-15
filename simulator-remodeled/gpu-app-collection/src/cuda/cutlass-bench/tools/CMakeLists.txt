@@ -20,9 +20,13 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-include_directories("external/googletest/googletest/include")
-
-add_subdirectory(external/googletest/googletest)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest/googletest/CMakeLists.txt")
+  include_directories("external/googletest/googletest/include")
+  add_subdirectory(external/googletest/googletest)
+  set(CUTLASS_GOOGLETEST_AVAILABLE ON)
+else()
+  message(STATUS "GoogleTest submodule is absent; skipping CUTLASS unit tests")
+  set(CUTLASS_GOOGLETEST_AVAILABLE OFF)
+endif()
 add_subdirectory(test)
 add_subdirectory(nvrtc)
-

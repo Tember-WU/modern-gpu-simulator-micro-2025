@@ -91,6 +91,12 @@ Deepbench_nvidia:
 	cp -r cuda/DeepBench/code/nvidia/bin/gemm_bench* $(BINDIR)/$(BINSUBDIR)/
 	cp -r cuda/DeepBench/code/nvidia/bin/rnn_bench* $(BINDIR)/$(BINSUBDIR)/
 
+# The Deepbench_nvidia_tencore_gemm trace suite only runs this binary.  Keep
+# its build independent of the cuDNN-only convolution and RNN benchmarks.
+Deepbench_nvidia_tencore_gemm:
+	$(SETENV) make $(MAKE_ARGS) -C cuda/DeepBench/code/nvidia gemm
+	cp cuda/DeepBench/code/nvidia/bin/gemm_bench-tencore $(BINDIR)/$(BINSUBDIR)/
+
 ###################################################################################################3
 #pagerank and bc does not work with SM_10 because they need atomic_add
 ###################################################################################################3
@@ -188,14 +194,18 @@ ispass-2009:
 #	cd CP; export PARBOIL_ROOT=`pwd`; cd common/src; make $(MAKE_ARGS); cd -; ./parboil compile cp cuda_short; cp benchmarks/cp/build/cuda_short/cp $(BINDIR)/$(BINSUBDIR)/CP 
 #	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C DG/3rdParty/ParMetis-3.1
 #	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C DG
+ifneq ($(ISPASS_ENABLED_ONLY),1)
 	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/LIB
+endif
 	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/LPS
 #	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/MUM
 	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/NN
 	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/NQU
 	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/RAY
 	$(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/STO
+ifneq ($(ISPASS_ENABLED_ONLY),1)
 	PID=$$$$ && cp -r cuda/ispass-2009/WP cuda/ispass-2009/WP-$$PID && $(SETENV) make $(MAKE_ARGS) noinline=$(noinline) -C cuda/ispass-2009/WP-$$PID && rm -rf cuda/ispass-2009/WP-$$PID
+endif
 
 lonestargpu-2.0:
 	$(setenv) make $(make_args) noinline=$(noinline) -C cuda/lonestargpu-2.0 all
@@ -309,7 +319,7 @@ deeplearning:
 cutlass:
 	mkdir -p $(BINDIR)/$(BINSUBDIR)/
 	git submodule init && git submodule update
-	$(SETENV) mkdir -p cuda/cutlass-bench/build && cd cuda/cutlass-bench/build && cmake .. -DUSE_GPGPUSIM=1 && make cutlass_perf_test
+	$(SETENV) mkdir -p cuda/cutlass-bench/build && cd cuda/cutlass-bench/build && cmake .. -DUSE_GPGPUSIM=1 -DCUTLASS_NVCC_ARCHS=86 && make cutlass_perf_test
 	cd cuda/cutlass-bench/build/tools/test/perf && ln -s -f ../../../../binary.sh . && ./binary.sh
 	cp cuda/cutlass-bench/build/tools/test/perf/cutlass_perf_test $(BINDIR)/$(BINSUBDIR)/
 

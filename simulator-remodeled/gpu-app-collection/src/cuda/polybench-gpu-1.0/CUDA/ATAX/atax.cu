@@ -152,8 +152,11 @@ void ataxGpu(DATA_TYPE* A, DATA_TYPE* x, DATA_TYPE* y, DATA_TYPE* tmp, DATA_TYPE
 	
 	cudaMemcpy(A_gpu, A, sizeof(DATA_TYPE) * NX * NY, cudaMemcpyHostToDevice);
 	cudaMemcpy(x_gpu, x, sizeof(DATA_TYPE) * NY, cudaMemcpyHostToDevice);
-	cudaMemcpy(y_gpu, y, sizeof(DATA_TYPE) * NY, cudaMemcpyHostToDevice);
-	cudaMemcpy(tmp_gpu, tmp, sizeof(DATA_TYPE) * NX, cudaMemcpyHostToDevice);
+	// Both kernels accumulate with +=, while the corresponding host arrays are
+	// intentionally uninitialized until the CPU reference runs.  Seed the GPU
+	// accumulators explicitly instead of copying indeterminate host memory.
+	cudaMemset(y_gpu, 0, sizeof(DATA_TYPE) * NY);
+	cudaMemset(tmp_gpu, 0, sizeof(DATA_TYPE) * NX);
 	
 	dim3 block(DIM_THREAD_BLOCK_X, DIM_THREAD_BLOCK_Y);
 	dim3 grid1((size_t)(ceil( ((float)NX) / ((float)block.x) )), 1);
@@ -212,4 +215,3 @@ int main(int argc, char** argv)
 
   	return 0;
 }
-

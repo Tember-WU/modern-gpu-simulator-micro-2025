@@ -111,6 +111,7 @@ void bfs(Graph &graph, foru *dist)
 	unsigned int *nv;
 	bool *changed, hchanged;
 	int iteration = 0;
+	const int trace_max_iterations = lonestar_trace_max_iterations();
 
 	double starttime, endtime;
 	double runtime;
@@ -160,7 +161,11 @@ void bfs(Graph &graph, foru *dist)
 	    drelax <<<nblocks/WORKPERTHREAD, BLKSIZE>>> (dist, graph.edgessrcdst, graph.edgessrcwt, graph.psrc, graph.noutgoing, nedges, nv, changed, graph.srcsrc, unroll);
 	    CudaTest("solving failed");
 	    cudaMemcpy(&hchanged, changed, sizeof(bool), cudaMemcpyDeviceToHost);
-	  } while (hchanged);
+	  } while (hchanged && (trace_max_iterations == 0 || iteration < trace_max_iterations));
+	  if (hchanged && trace_max_iterations > 0 && iteration >= trace_max_iterations) {
+	    lonestar_trace_iteration_limit_reached = true;
+	    printf("trace iteration limit reached at %d iterations.\n", iteration);
+	  }
 	  cudaEventRecord(stop, 0);  cudaEventSynchronize(stop);  cudaEventElapsedTime(&time, start, stop);
 	  endtime = rtclock();
 

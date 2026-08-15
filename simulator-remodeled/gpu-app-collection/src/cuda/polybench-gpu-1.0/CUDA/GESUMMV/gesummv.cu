@@ -58,7 +58,7 @@ void gesummv(DATA_TYPE *A, DATA_TYPE *B, DATA_TYPE *x, DATA_TYPE *y, DATA_TYPE *
 }
 
 
-void init(DATA_TYPE* A, DATA_TYPE* x)
+void init(DATA_TYPE* A, DATA_TYPE* B, DATA_TYPE* x)
 {
   	int i, j;
 
@@ -69,6 +69,7 @@ void init(DATA_TYPE* A, DATA_TYPE* x)
 		for (j = 0; j < N; j++) 
 		{
 			A[i*N + j] = ((DATA_TYPE) i*j) / N;
+			B[i*N + j] = ((DATA_TYPE) i*j) / N;
 		}
     }
 }
@@ -136,8 +137,10 @@ void gesummvCuda(DATA_TYPE* A, DATA_TYPE* B, DATA_TYPE* x, DATA_TYPE* y, DATA_TY
 	cudaMemcpy(A_gpu, A, sizeof(DATA_TYPE) * N * N, cudaMemcpyHostToDevice);
 	cudaMemcpy(B_gpu, B, sizeof(DATA_TYPE) * N * N, cudaMemcpyHostToDevice);
 	cudaMemcpy(x_gpu, x, sizeof(DATA_TYPE) * N, cudaMemcpyHostToDevice);
-	cudaMemcpy(y_gpu, y, sizeof(DATA_TYPE) * N, cudaMemcpyHostToDevice);
-	cudaMemcpy(tmp_gpu, tmp, sizeof(DATA_TYPE) * N, cudaMemcpyHostToDevice);
+	// The kernel accumulates with +=, while the host reference initializes these
+	// arrays only after the GPU run.  Start both device accumulators from zero.
+	cudaMemset(y_gpu, 0, sizeof(DATA_TYPE) * N);
+	cudaMemset(tmp_gpu, 0, sizeof(DATA_TYPE) * N);
 
 	dim3 block(DIM_THREAD_BLOCK_X, DIM_THREAD_BLOCK_Y);
 	dim3 grid((unsigned int)ceil( ((float)N) / ((float)block.x) ), 1);
@@ -171,7 +174,7 @@ int main(int argc, char *argv[])
 	y_outputFromGpu = (DATA_TYPE*)malloc(N*sizeof(DATA_TYPE));
 	tmp = (DATA_TYPE*)malloc(N*sizeof(DATA_TYPE));
 
-	init(A, x);
+	init(A, B, x);
 	
 	GPU_argv_init();
 	gesummvCuda(A, B, x, y, tmp, y_outputFromGpu);
@@ -192,4 +195,3 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-

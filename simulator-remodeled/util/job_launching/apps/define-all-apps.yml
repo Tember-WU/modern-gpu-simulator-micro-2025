@@ -316,8 +316,12 @@ rodinia-3.1:
               qos: all
               openmp-cpus: 8
         - lavaMD-rodinia-3.1:
-            - args:  -boxes1d 10
-              accel-sim-mem: 130G
+            # boxes1d=10 requires roughly 130 GB while tracing and exceeds the
+            # 56 GiB RAM available on the A6000 trace host.  The total number
+            # of boxes scales cubically, so 4 preserves the same kernel and
+            # neighbor-computation path while keeping tracing practical.
+            - args:  -boxes1d 4
+              accel-sim-mem: 10G
               qos: big
               openmp-cpus: 12
               partition: memory
@@ -331,7 +335,10 @@ rodinia-3.1:
               qos: all
               openmp-cpus: 3
         - myocyte-rodinia-3.1:
-            - args:  100 1 0
+            # xmax=100 produces well over 1000 launches of the same adaptive
+            # solver kernel.  Twenty time units retain the solver path while
+            # keeping the trace practical.
+            - args:  20 1 0
               accel-sim-mem: 6G
               qos: big
               openmp-cpus: 3
@@ -485,90 +492,92 @@ cutlass_5_trace:
     data_dirs: "$GPUAPPS_ROOT/data_dirs/"
     execs:
         - cutlass_perf_test:
-            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=2560 --n=32 --k=2560 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=32 --k=2560 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=2560 --n=64 --k=2560 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=64 --k=2560 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=2560 --n=128 --k=2560 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=128 --k=2560 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=2560 --n=7000 --k=2560 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=7000 --k=2560 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 85G
               qos: big
               openmp-cpus: 6
               partition: memory
-            - args: --seed=2020 --dist=0  --m=4096 --n=16 --k=4096 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=16 --k=4096 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 30G
               qos: big
               openmp-cpus: 12
-            - args: --seed=2020 --dist=0  --m=4096 --n=32 --k=4096 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=32 --k=4096 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: big
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=4096 --n=64 --k=4096 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=64 --k=4096 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=4096 --n=128 --k=4096 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=128 --k=4096 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
-            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 35G
               qos: all
               openmp-cpus: 12
-            - args: --seed=2020 --dist=0  --m=2560 --n=32 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=32 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 35G
               qos: all
               openmp-cpus: 12
-            - args: --seed=2020 --dist=0  --m=2560 --n=64 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=64 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 35G
               qos: all
               openmp-cpus: 12
-            - args: --seed=2020 --dist=0  --m=2560 --n=128 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=128 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 35G
               qos: all
               openmp-cpus: 12
-            - args: --seed=2020 --dist=0  --m=2560 --n=512 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=512 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 50G
               qos: big
               openmp-cpus: 16
               partition: memory
-            - args: --seed=2020 --dist=0  --m=2560 --n=1024 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=1024 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 80G
               qos: big
               openmp-cpus: 12
               partition: memory
-            - args: --seed=2020 --dist=0  --m=2560 --n=2560 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            # K is capped for trace collection: at K=2560 this single launch
+            # exceeds the 56 GiB host-memory capacity of the A6000 machine.
+            - args: --seed=2020 --dist=0  --m=2560 --n=2560 --k=1024 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 120G
               qos: huge
               openmp-cpus: 16
               partition: memory
-            - args: --seed=2020 --dist=0  --m=4096 --n=16 --k=4096 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=16 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 40G
               qos: big
               openmp-cpus: 12
               partition: memory
-            - args: --seed=2020 --dist=0  --m=4096 --n=32 --k=4096 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=32 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 40G
               qos: big
               openmp-cpus: 12
               partition: memory
-            - args: --seed=2020 --dist=0  --m=4096 --n=64 --k=4096 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=64 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 45G
               qos: big
               openmp-cpus: 12
               partition: memory
-            - args: --seed=2020 --dist=0  --m=4096 --n=128 --k=4096 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=128 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 45G
               qos: big
               openmp-cpus: 12
@@ -580,7 +589,7 @@ cutlass_5_trace_sgemm:
     data_dirs: "$GPUAPPS_ROOT/data_dirs/"
     execs:
         - cutlass_perf_test:
-            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 35G
               qos: all
               openmp-cpus: 12
@@ -590,18 +599,32 @@ cutlass_5_trace_sgemm_2560:
     data_dirs: "$GPUAPPS_ROOT/data_dirs/"
     execs:
         - cutlass_perf_test:
-            - args: --seed=2020 --dist=0  --m=2560 --n=2560 --k=2560 --kernels=sgemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=2560 --k=1024 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 120G
               qos: huge
               openmp-cpus: 16
               partition: memory
+
+# Recovery subset used when resuming local A6000 trace collection after the
+# oversized original square SGEMM configuration was stopped.  The canonical
+# cutlass_5_trace suite above contains the same corrected configurations.
+cutlass_5_trace_a6000_recovery:
+    exec_dir: "$GPUAPPS_ROOT/bin/$CUDA_VERSION/release/"
+    data_dirs: "$GPUAPPS_ROOT/data_dirs/"
+    execs:
+        - cutlass_perf_test:
+            - args: --seed=2020 --dist=0  --m=2560 --n=2560 --k=1024 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=16 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=32 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=64 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=4096 --n=128 --k=4096 --kernels=sgemm_nn  --iterations=1 --providers=cutlass
 
 cutlass_5_trace_wmma:
     exec_dir: "$GPUAPPS_ROOT/bin/$CUDA_VERSION/release/"
     data_dirs: "$GPUAPPS_ROOT/data_dirs/"
     execs:
         - cutlass_perf_test:
-            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=wmma_gemm_nn  --iterations=5 --providers=cutlass
+            - args: --seed=2020 --dist=0  --m=2560 --n=16 --k=2560 --kernels=wmma_gemm_nn  --iterations=1 --providers=cutlass
               accel-sim-mem: 16G
               qos: all
               openmp-cpus: 4
@@ -695,10 +718,13 @@ dragon-naive:
               qos: all
               openmp-cpus: 4
         - testJoin:
-            - args: -v -e -l 204800 -r 204800
-              accel-sim-mem: 90G
+            # The original 204800/204800 input buffers the main join kernel's
+            # instruction events beyond this 56 GiB trace host's safe memory
+            # limit. Keep the same join path at one tenth of the input size.
+            - args: -v -e -l 20480 -r 20480
+              accel-sim-mem: 15G
               qos: all
-              openmp-cpus: 12
+              openmp-cpus: 4
 
 dragon-cdp:
     exec_dir: "$GPUAPPS_ROOT/src/cuda/dragon_li/cdp_bin/$CUDA_VERSION/"
@@ -711,7 +737,9 @@ dragon-cdp:
         - testSssp-cdp:
             - args: -g ./data/sample_cdp.gr -e -v --cdp
             - args: -g ./data/citationCiteseer.graph -f metis -e -v --cdp
-            - args: -g ./data/coPapersDBLP.graph -f metis -e -v --cdp
+            # The default frontier capacity, and even --sf 1.5, can overflow
+            # for this graph and make the application's CPU verification fail.
+            - args: -g ./data/coPapersDBLP.graph -f metis -e -v --cdp --sf 2
 
 
 proxy-apps-doe:
@@ -865,11 +893,13 @@ lonestargpu-2.0:
               accel-sim-mem: 35G
               qos: big
               openmp-cpus: 12
-            - args: ./data/rmat20.gr
-              accel-sim-mem: 110G
-              qos: big
-              openmp-cpus: 16
-              partition: memory
+            # rmat20 requires more host trace-buffer memory than the 56 GiB
+            # A6000 workstation provides.  Keep the same algorithm and graph
+            # family, but use the bundled small symmetric R-MAT input.
+            - args: ./data/rmat12.sym.gr
+              accel-sim-mem: 10G
+              qos: all
+              openmp-cpus: 4
             - args: ./data/USA-road-d.NY.gr
               accel-sim-mem: 30G
               qos: big

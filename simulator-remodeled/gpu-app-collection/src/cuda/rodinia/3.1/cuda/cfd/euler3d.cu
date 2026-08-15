@@ -4,6 +4,7 @@
 //#include <cutil.h>
 //#include <helper_cuda.h>
 #include <helper_timer.h>
+#include <cstdlib>
 #include <iostream>
 #include <fstream>
 
@@ -14,7 +15,7 @@
  * 
  */ 
 #define GAMMA 1.4f
-#define iterations 2000
+#define CFD_DEFAULT_ITERATIONS 2000
 // #ifndef block_length
 // 	#define block_length 192
 // #endif
@@ -577,8 +578,17 @@ int main(int argc, char** argv)
 	// CUT_SAFE_CALL( cutStartTimer( timer));
 	sdkCreateTimer(&timer); 
 	sdkStartTimer(&timer); 
+	int iteration_count = CFD_DEFAULT_ITERATIONS;
+	if (const char* value = std::getenv("RODINIA_CFD_ITERATIONS"))
+	{
+		const int requested = std::atoi(value);
+		if (requested > 0)
+			iteration_count = requested;
+	}
+	std::cout << "Iterations: " << iteration_count << std::endl;
+
 	// Begin iterations
-	for(int i = 0; i < iterations; i++)
+	for(int i = 0; i < iteration_count; i++)
 	{
 		copy<float>(old_variables, variables, nelr*NVAR);
 		
@@ -599,7 +609,7 @@ int main(int argc, char** argv)
 	//	CUT_SAFE_CALL( cutStopTimer(timer) );  
 	sdkStopTimer(&timer); 
 
-	std::cout  << (sdkGetAverageTimerValue(&timer)/1000.0)  / iterations << " seconds per iteration" << std::endl;
+	std::cout  << (sdkGetAverageTimerValue(&timer)/1000.0)  / iteration_count << " seconds per iteration" << std::endl;
 
 	std::cout << "Saving solution..." << std::endl;
 	dump(variables, nel, nelr);

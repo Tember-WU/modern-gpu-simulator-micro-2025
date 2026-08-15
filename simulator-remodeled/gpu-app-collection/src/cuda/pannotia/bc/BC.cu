@@ -104,6 +104,20 @@ int main(int argc, char **argv)
     // Parse graph and store it in a CSR format
     csr_array *csr = parseCOO(tmpchar, &num_nodes, &num_edges, directed);
 
+    int source_limit = num_nodes;
+    const char *source_limit_env = getenv("PANNOTIA_BC_SOURCES");
+    if (source_limit_env && source_limit_env[0] != '\0') {
+        char *end = NULL;
+        long requested = strtol(source_limit_env, &end, 10);
+        if (end == source_limit_env || *end != '\0' || requested <= 0) {
+            fprintf(stderr, "ERROR: invalid PANNOTIA_BC_SOURCES=%s\n",
+                    source_limit_env);
+            return -1;
+        }
+        source_limit = std::min(num_nodes, static_cast<int>(requested));
+    }
+    printf("BC sources: %d (maximum %d)\n", source_limit, num_nodes);
+
     // Allocate the bc host array
     float *bc_h = (float *)malloc(num_nodes * sizeof(float));
     if (!bc_h) fprintf(stderr, "malloc failed bc_h\n");
@@ -211,7 +225,7 @@ int main(int argc, char **argv)
     clean_bc<<< grid, threads >>>(bc_d, num_nodes);
 
     // Main computation loop
-    for (int i = 0; i < num_nodes && i < MAX_ITERS; i++) {
+    for (int i = 0; i < source_limit && i < MAX_ITERS; i++) {
 
         clean_1d_array<<< grid, threads >>>(i, dist_d, sigma_d, rho_d,
                                             num_nodes);

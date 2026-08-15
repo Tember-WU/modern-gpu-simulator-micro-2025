@@ -64,6 +64,7 @@ void sssp(foru *hdist, foru *dist, Graph &graph, long unsigned totalcommu)
 	foru foruzero = 0.0;
 	bool *changed, hchanged;
 	int iteration = 0;
+	const int trace_max_iterations = lonestar_trace_max_iterations();
 	double starttime, endtime;
 	KernelConfig kconf;
 
@@ -84,7 +85,11 @@ void sssp(foru *hdist, foru *dist, Graph &graph, long unsigned totalcommu)
 		CudaTest("solving failed");
 
 		CUDA_SAFE_CALL(cudaMemcpy(&hchanged, changed, sizeof(hchanged), cudaMemcpyDeviceToHost));
-	} while (hchanged);
+	} while (hchanged && (trace_max_iterations == 0 || iteration < trace_max_iterations));
+	if (hchanged && trace_max_iterations > 0 && iteration >= trace_max_iterations) {
+		lonestar_trace_iteration_limit_reached = true;
+		printf("trace iteration limit reached at %d iterations.\n", iteration);
+	}
 	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 	endtime = rtclock(); // changed from lsg (for now) which included memcopies of graph too.
 

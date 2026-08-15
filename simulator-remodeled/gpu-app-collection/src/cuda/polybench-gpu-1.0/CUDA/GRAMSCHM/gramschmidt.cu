@@ -36,11 +36,11 @@ typedef float DATA_TYPE;
 
 
 
-void gramschmidt(DATA_TYPE* A, DATA_TYPE* R, DATA_TYPE* Q)
+void gramschmidt(DATA_TYPE* A, DATA_TYPE* R, DATA_TYPE* Q, int iteration_count)
 {
 	int i,j,k;
 	DATA_TYPE nrm;
-	for (k = 0; k < N; k++)
+	for (k = 0; k < iteration_count; k++)
 	{
 		nrm = 0;
 		for (i = 0; i < M; i++)
@@ -166,7 +166,7 @@ __global__ void gramschmidt_kernel3(DATA_TYPE *a, DATA_TYPE *r, DATA_TYPE *q, in
 }
 
 
-void gramschmidtCuda(DATA_TYPE* A, DATA_TYPE* R, DATA_TYPE* Q, DATA_TYPE* A_outputFromGpu)
+void gramschmidtCuda(DATA_TYPE* A, DATA_TYPE* R, DATA_TYPE* Q, DATA_TYPE* A_outputFromGpu, int iteration_count)
 {
 	double t_start, t_end;
 
@@ -186,7 +186,7 @@ void gramschmidtCuda(DATA_TYPE* A, DATA_TYPE* R, DATA_TYPE* Q, DATA_TYPE* A_outp
 	
 	t_start = rtclock();
 	int k;
-	for (k = 0; k < N; k++)
+	for (k = 0; k < iteration_count; k++)
 	{
 		gramschmidt_kernel1<<<gridKernel1,block>>>(A_gpu, R_gpu, Q_gpu, k);
 		cudaThreadSynchronize();
@@ -209,6 +209,15 @@ void gramschmidtCuda(DATA_TYPE* A, DATA_TYPE* R, DATA_TYPE* Q, DATA_TYPE* A_outp
 int main(int argc, char *argv[])
 {
 	double t_start, t_end;
+	int iteration_count = N;
+	const char* iteration_env = getenv("POLYBENCH_GRAMSCHMIDT_ITERATIONS");
+	if (iteration_env != NULL)
+	{
+		int requested = atoi(iteration_env);
+		if (requested > 0 && requested <= N)
+			iteration_count = requested;
+	}
+	printf("Gram-Schmidt iterations: %d (maximum %d)\n", iteration_count, N);
 
 	DATA_TYPE* A;
 	DATA_TYPE* A_outputFromGpu;
@@ -223,10 +232,10 @@ int main(int argc, char *argv[])
 	init_array(A);
 	
 	GPU_argv_init();
-	gramschmidtCuda(A, R, Q, A_outputFromGpu);
+	gramschmidtCuda(A, R, Q, A_outputFromGpu, iteration_count);
 	
 	t_start = rtclock();
-	gramschmidt(A, R, Q);
+	gramschmidt(A, R, Q, iteration_count);
 	t_end = rtclock();
 
 	fprintf(stdout, "CPU Runtime: %0.6lfs\n", t_end - t_start);
@@ -240,4 +249,3 @@ int main(int argc, char *argv[])
 
     	return 0;
 }
-
