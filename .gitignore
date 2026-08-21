@@ -8,3 +8,5 @@
 /A6000_compressed_dataset/
 __pycache__/
 *.py[cod]
+
+/simulation_results/
