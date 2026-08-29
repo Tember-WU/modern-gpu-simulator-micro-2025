@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include <functional>
 #include <vector>
 #include <queue>
 #include <memory>

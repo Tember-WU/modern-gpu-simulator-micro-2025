@@ -762,7 +762,7 @@ class gpgpu_sim : public gpgpu_t {
   std::map<std::string, address_type> *get_kernel_adresses_map() { return &m_first_pc_of_each_defined_kernel; } // MOD. Instruction addresses of different kernels have a different address request in memory
   void launch(kernel_info_t *kinfo);
   void configure_scheduler_for_dynamic_kernel(unsigned dynamic_launch_id,
-                                              kernel_info_t *kernel);
+                                               kernel_info_t *kernel);
   bool can_start_kernel();
   unsigned finished_kernel();
   void set_kernel_done(kernel_info_t *kernel);
@@ -876,6 +876,7 @@ class gpgpu_sim : public gpgpu_t {
   void set_warp_scheduler_policy_on_all_clusters(
       const warp_scheduler_spec &spec);
   void maybe_switch_dynamic_kernel_scheduler();
+  void maybe_sample_dynamic_kernel_l1d_read_miss_mpki();
   void issue_block2core();
   void print_dram_stats(FILE *fout) const;
   void shader_print_runtime_stat(FILE *fout);
@@ -905,6 +906,37 @@ class gpgpu_sim : public gpgpu_t {
   unsigned m_scheduler_phase_dynamic_launch_id;
   warp_scheduler_spec m_scheduler_phase_target_policy;
   bool m_scheduler_phase_switched;
+
+  // Profiling snapshots use the same execution-cycle origin as dynamic
+  // scheduler switching (kernel_info_t::start_cycle), so launch latency is
+  // excluded.  The difference between the 10k and 20k snapshots is reported
+  // when a dynamic kernel runs for more than 20k execution core cycles.
+  kernel_info_t *m_l1d_mpki_profile_kernel;
+  unsigned m_l1d_mpki_profile_dynamic_launch_id;
+  bool m_l1d_mpki_profile_10k_sampled;
+  bool m_l1d_mpki_profile_20k_sampled;
+  unsigned long long m_l1d_mpki_profile_global_miss_10k;
+  unsigned long long m_l1d_mpki_profile_global_miss_20k;
+  unsigned long long m_l1d_mpki_profile_global_sector_miss_10k;
+  unsigned long long m_l1d_mpki_profile_global_sector_miss_20k;
+  unsigned long long m_l1d_mpki_profile_local_miss_10k;
+  unsigned long long m_l1d_mpki_profile_local_miss_20k;
+  unsigned long long m_l1d_mpki_profile_local_sector_miss_10k;
+  unsigned long long m_l1d_mpki_profile_local_sector_miss_20k;
+  unsigned long long m_l1d_mpki_profile_read_misses_10k;
+  unsigned long long m_l1d_mpki_profile_read_misses_20k;
+  unsigned long long m_l2_mpki_profile_global_miss_10k;
+  unsigned long long m_l2_mpki_profile_global_miss_20k;
+  unsigned long long m_l2_mpki_profile_global_sector_miss_10k;
+  unsigned long long m_l2_mpki_profile_global_sector_miss_20k;
+  unsigned long long m_l2_mpki_profile_local_miss_10k;
+  unsigned long long m_l2_mpki_profile_local_miss_20k;
+  unsigned long long m_l2_mpki_profile_local_sector_miss_10k;
+  unsigned long long m_l2_mpki_profile_local_sector_miss_20k;
+  unsigned long long m_l2_mpki_profile_read_misses_10k;
+  unsigned long long m_l2_mpki_profile_read_misses_20k;
+  unsigned long long m_l1d_mpki_profile_warp_icount_10k;
+  unsigned long long m_l1d_mpki_profile_warp_icount_20k;
 
   std::list<unsigned> m_finished_kernel;
   std::map<unsigned int, grid_barrier_status> m_grid_barrier_status;

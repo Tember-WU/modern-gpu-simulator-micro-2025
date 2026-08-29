@@ -63,6 +63,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <iomanip>
 #include "zlib.h"
 
 #include "dram.h"
@@ -1541,6 +1542,40 @@ void gpgpu_sim::set_warp_scheduler_policy_on_all_clusters(
 
 void gpgpu_sim::configure_scheduler_for_dynamic_kernel(
     unsigned dynamic_launch_id, kernel_info_t *kernel) {
+  // Start a fresh set of cumulative-counter snapshots for this dynamic
+  // launch.  Scheduler-map profiling currently requires concurrent kernels
+  // to be disabled, so there is at most one profiled kernel at a time.
+  m_l1d_mpki_profile_kernel =
+      (!m_shader_config->dynamic_kernel_scheduler_map.empty() &&
+       m_shader_config->dynamic_kernel_scheduler_switch_cycle >= 20000)
+          ? kernel
+          : nullptr;
+  m_l1d_mpki_profile_dynamic_launch_id = dynamic_launch_id;
+  m_l1d_mpki_profile_10k_sampled = false;
+  m_l1d_mpki_profile_20k_sampled = false;
+  m_l1d_mpki_profile_global_miss_10k = 0;
+  m_l1d_mpki_profile_global_miss_20k = 0;
+  m_l1d_mpki_profile_global_sector_miss_10k = 0;
+  m_l1d_mpki_profile_global_sector_miss_20k = 0;
+  m_l1d_mpki_profile_local_miss_10k = 0;
+  m_l1d_mpki_profile_local_miss_20k = 0;
+  m_l1d_mpki_profile_local_sector_miss_10k = 0;
+  m_l1d_mpki_profile_local_sector_miss_20k = 0;
+  m_l1d_mpki_profile_read_misses_10k = 0;
+  m_l1d_mpki_profile_read_misses_20k = 0;
+  m_l2_mpki_profile_global_miss_10k = 0;
+  m_l2_mpki_profile_global_miss_20k = 0;
+  m_l2_mpki_profile_global_sector_miss_10k = 0;
+  m_l2_mpki_profile_global_sector_miss_20k = 0;
+  m_l2_mpki_profile_local_miss_10k = 0;
+  m_l2_mpki_profile_local_miss_20k = 0;
+  m_l2_mpki_profile_local_sector_miss_10k = 0;
+  m_l2_mpki_profile_local_sector_miss_20k = 0;
+  m_l2_mpki_profile_read_misses_10k = 0;
+  m_l2_mpki_profile_read_misses_20k = 0;
+  m_l1d_mpki_profile_warp_icount_10k = 0;
+  m_l1d_mpki_profile_warp_icount_20k = 0;
+
   if (m_shader_config->dynamic_kernel_scheduler_map.empty()) return;
   if (dynamic_launch_id == 0 || kernel == nullptr) {
     std::cerr << "Cannot select a per-kernel warp scheduler without a valid "
@@ -1589,6 +1624,164 @@ void gpgpu_sim::configure_scheduler_for_dynamic_kernel(
               << " execution core cycles";
   }
   std::cout << std::endl;
+}
+
+void gpgpu_sim::maybe_sample_dynamic_kernel_l1d_read_miss_mpki() {
+  if (m_l1d_mpki_profile_kernel == nullptr ||
+      m_l1d_mpki_profile_20k_sampled) {
+    return;
+  }
+
+  const unsigned kernel_uid = m_l1d_mpki_profile_kernel->get_uid();
+  if (std::find(m_executed_kernel_uids.begin(), m_executed_kernel_uids.end(),
+                kernel_uid) == m_executed_kernel_uids.end()) {
+    return;  // Kernel launch latency is still being consumed.
+  }
+
+  const unsigned long long current_cycle = get_current_gpu_cycle();
+  assert(current_cycle >= m_l1d_mpki_profile_kernel->start_cycle);
+  const unsigned long long execution_cycles =
+      current_cycle - m_l1d_mpki_profile_kernel->start_cycle;
+  if (execution_cycles < 10000) return;
+
+  cache_stats core_cache_stats;
+  core_cache_stats.clear();
+  for (unsigned i = 0; i < m_config.num_cluster(); ++i) {
+    m_cluster[i]->get_cache_stats(core_cache_stats);
+  }
+  const unsigned long long global_miss =
+      core_cache_stats(GLOBAL_ACC_R, MISS, false);
+  const unsigned long long global_sector_miss =
+      core_cache_stats(GLOBAL_ACC_R, SECTOR_MISS, false);
+  const unsigned long long local_miss =
+      core_cache_stats(LOCAL_ACC_R, MISS, false);
+  const unsigned long long local_sector_miss =
+      core_cache_stats(LOCAL_ACC_R, SECTOR_MISS, false);
+  const unsigned long long read_misses = global_miss + global_sector_miss +
+                                         local_miss + local_sector_miss;
+
+  cache_stats l2_cache_stats;
+  l2_cache_stats.clear();
+  if (!m_memory_config->m_L2_config.disabled()) {
+    for (unsigned i = 0; i < m_memory_config->m_n_mem_sub_partition; ++i) {
+      m_memory_sub_partition[i]->accumulate_L2cache_stats(l2_cache_stats);
+    }
+  }
+  const unsigned long long l2_global_miss =
+      l2_cache_stats(GLOBAL_ACC_R, MISS, false);
+  const unsigned long long l2_global_sector_miss =
+      l2_cache_stats(GLOBAL_ACC_R, SECTOR_MISS, false);
+  const unsigned long long l2_local_miss =
+      l2_cache_stats(LOCAL_ACC_R, MISS, false);
+  const unsigned long long l2_local_sector_miss =
+      l2_cache_stats(LOCAL_ACC_R, SECTOR_MISS, false);
+  const unsigned long long l2_read_misses =
+      l2_global_miss + l2_global_sector_miss + l2_local_miss +
+      l2_local_sector_miss;
+
+  unsigned long long warp_icount = 0;
+  for (unsigned sid = 0; sid < m_shader_config->num_shader(); ++sid) {
+    warp_icount += m_shader_stats->m_num_sim_winsn[sid];
+  }
+
+  if (!m_l1d_mpki_profile_10k_sampled) {
+    m_l1d_mpki_profile_global_miss_10k = global_miss;
+    m_l1d_mpki_profile_global_sector_miss_10k = global_sector_miss;
+    m_l1d_mpki_profile_local_miss_10k = local_miss;
+    m_l1d_mpki_profile_local_sector_miss_10k = local_sector_miss;
+    m_l1d_mpki_profile_read_misses_10k = read_misses;
+    m_l2_mpki_profile_global_miss_10k = l2_global_miss;
+    m_l2_mpki_profile_global_sector_miss_10k = l2_global_sector_miss;
+    m_l2_mpki_profile_local_miss_10k = l2_local_miss;
+    m_l2_mpki_profile_local_sector_miss_10k = l2_local_sector_miss;
+    m_l2_mpki_profile_read_misses_10k = l2_read_misses;
+    m_l1d_mpki_profile_warp_icount_10k = warp_icount;
+    m_l1d_mpki_profile_10k_sampled = true;
+  }
+  if (execution_cycles >= 20000) {
+    m_l1d_mpki_profile_global_miss_20k = global_miss;
+    m_l1d_mpki_profile_global_sector_miss_20k = global_sector_miss;
+    m_l1d_mpki_profile_local_miss_20k = local_miss;
+    m_l1d_mpki_profile_local_sector_miss_20k = local_sector_miss;
+    m_l1d_mpki_profile_read_misses_20k = read_misses;
+    m_l2_mpki_profile_global_miss_20k = l2_global_miss;
+    m_l2_mpki_profile_global_sector_miss_20k = l2_global_sector_miss;
+    m_l2_mpki_profile_local_miss_20k = l2_local_miss;
+    m_l2_mpki_profile_local_sector_miss_20k = l2_local_sector_miss;
+    m_l2_mpki_profile_read_misses_20k = l2_read_misses;
+    m_l1d_mpki_profile_warp_icount_20k = warp_icount;
+    m_l1d_mpki_profile_20k_sampled = true;
+
+    // Report as soon as the profiling window closes.  A trace-driven run
+    // stopped by -gpgpu_max_cycle exits its simulation loop without retiring
+    // the active kernel, so deferring this output to set_kernel_done() would
+    // lose the profiling result for window-only runs.
+    const unsigned long long window_read_misses =
+        m_l1d_mpki_profile_read_misses_20k -
+        m_l1d_mpki_profile_read_misses_10k;
+    const unsigned long long window_warp_icount =
+        m_l1d_mpki_profile_warp_icount_20k -
+        m_l1d_mpki_profile_warp_icount_10k;
+    const unsigned long long window_global_miss =
+        m_l1d_mpki_profile_global_miss_20k -
+        m_l1d_mpki_profile_global_miss_10k;
+    const unsigned long long window_global_sector_miss =
+        m_l1d_mpki_profile_global_sector_miss_20k -
+        m_l1d_mpki_profile_global_sector_miss_10k;
+    const unsigned long long window_local_miss =
+        m_l1d_mpki_profile_local_miss_20k -
+        m_l1d_mpki_profile_local_miss_10k;
+    const unsigned long long window_local_sector_miss =
+        m_l1d_mpki_profile_local_sector_miss_20k -
+        m_l1d_mpki_profile_local_sector_miss_10k;
+    const unsigned long long window_l2_global_miss =
+        m_l2_mpki_profile_global_miss_20k -
+        m_l2_mpki_profile_global_miss_10k;
+    const unsigned long long window_l2_global_sector_miss =
+        m_l2_mpki_profile_global_sector_miss_20k -
+        m_l2_mpki_profile_global_sector_miss_10k;
+    const unsigned long long window_l2_local_miss =
+        m_l2_mpki_profile_local_miss_20k -
+        m_l2_mpki_profile_local_miss_10k;
+    const unsigned long long window_l2_local_sector_miss =
+        m_l2_mpki_profile_local_sector_miss_20k -
+        m_l2_mpki_profile_local_sector_miss_10k;
+    const unsigned long long window_l2_read_misses =
+        m_l2_mpki_profile_read_misses_20k -
+        m_l2_mpki_profile_read_misses_10k;
+    const double mpki = window_warp_icount
+                            ? 1000.0 * window_read_misses /
+                                  static_cast<double>(window_warp_icount)
+                            : 0.0;
+    const double l2_mpki = window_warp_icount
+                               ? 1000.0 * window_l2_read_misses /
+                                     static_cast<double>(window_warp_icount)
+                               : 0.0;
+    std::cout << "Dynamic_kernel_L1D_read_miss_profile: launch_id="
+              << m_l1d_mpki_profile_dynamic_launch_id
+              << ", kernel_uid=" << kernel_uid << ", cycle_begin=10000"
+              << ", cycle_end=20000"
+              << ", execution_cycles=" << execution_cycles
+              << ", GLOBAL_ACC_R_MISS=" << window_global_miss
+              << ", GLOBAL_ACC_R_SECTOR_MISS="
+              << window_global_sector_miss
+              << ", LOCAL_ACC_R_MISS=" << window_local_miss
+              << ", LOCAL_ACC_R_SECTOR_MISS="
+              << window_local_sector_miss
+              << ", L1D_cache_read_misses=" << window_read_misses
+              << ", gpgpu_n_tot_w_icount=" << window_warp_icount
+              << ", L1D_cache_read_miss_MPKI=" << std::fixed
+              << std::setprecision(6) << mpki
+              << ", L2_GLOBAL_ACC_R_MISS=" << window_l2_global_miss
+              << ", L2_GLOBAL_ACC_R_SECTOR_MISS="
+              << window_l2_global_sector_miss
+              << ", L2_LOCAL_ACC_R_MISS=" << window_l2_local_miss
+              << ", L2_LOCAL_ACC_R_SECTOR_MISS="
+              << window_l2_local_sector_miss
+              << ", L2_cache_read_misses=" << window_l2_read_misses
+              << ", L2_cache_read_miss_MPKI=" << l2_mpki
+              << std::defaultfloat << std::endl;
+  }
 }
 
 void gpgpu_sim::maybe_switch_dynamic_kernel_scheduler() {
@@ -1741,6 +1934,25 @@ unsigned gpgpu_sim::finished_kernel() {
 
 void gpgpu_sim::set_kernel_done(kernel_info_t *kernel) {
   unsigned uid = kernel->get_uid();
+  if (m_l1d_mpki_profile_kernel == kernel) {
+    const unsigned long long current_cycle = get_current_gpu_cycle();
+    const bool kernel_started =
+        std::find(m_executed_kernel_uids.begin(), m_executed_kernel_uids.end(),
+                  uid) != m_executed_kernel_uids.end();
+    const unsigned long long execution_cycles =
+        kernel_started && current_cycle >= kernel->start_cycle
+            ? current_cycle - kernel->start_cycle
+            : 0;
+    if (!m_l1d_mpki_profile_20k_sampled && execution_cycles < 20000) {
+      std::cout << "Dynamic_kernel_cache_read_miss_profile_skipped: launch_id="
+                << m_l1d_mpki_profile_dynamic_launch_id
+                << ", kernel_uid=" << uid
+                << ", execution_cycles=" << execution_cycles
+                << ", required_execution_cycles=20000"
+                << ", reason=execution_cycles_less_than_20000" << std::endl;
+    }
+    m_l1d_mpki_profile_kernel = nullptr;
+  }
   if (m_scheduler_phase_kernel == kernel) {
     m_scheduler_phase_kernel = nullptr;
     m_scheduler_phase_dynamic_launch_id = 0;
@@ -1791,6 +2003,32 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   m_scheduler_phase_target_policy =
       parse_warp_scheduler_spec(m_shader_config->gpgpu_scheduler_string);
   m_scheduler_phase_switched = true;
+  m_l1d_mpki_profile_kernel = nullptr;
+  m_l1d_mpki_profile_dynamic_launch_id = 0;
+  m_l1d_mpki_profile_10k_sampled = false;
+  m_l1d_mpki_profile_20k_sampled = false;
+  m_l1d_mpki_profile_global_miss_10k = 0;
+  m_l1d_mpki_profile_global_miss_20k = 0;
+  m_l1d_mpki_profile_global_sector_miss_10k = 0;
+  m_l1d_mpki_profile_global_sector_miss_20k = 0;
+  m_l1d_mpki_profile_local_miss_10k = 0;
+  m_l1d_mpki_profile_local_miss_20k = 0;
+  m_l1d_mpki_profile_local_sector_miss_10k = 0;
+  m_l1d_mpki_profile_local_sector_miss_20k = 0;
+  m_l1d_mpki_profile_read_misses_10k = 0;
+  m_l1d_mpki_profile_read_misses_20k = 0;
+  m_l2_mpki_profile_global_miss_10k = 0;
+  m_l2_mpki_profile_global_miss_20k = 0;
+  m_l2_mpki_profile_global_sector_miss_10k = 0;
+  m_l2_mpki_profile_global_sector_miss_20k = 0;
+  m_l2_mpki_profile_local_miss_10k = 0;
+  m_l2_mpki_profile_local_miss_20k = 0;
+  m_l2_mpki_profile_local_sector_miss_10k = 0;
+  m_l2_mpki_profile_local_sector_miss_20k = 0;
+  m_l2_mpki_profile_read_misses_10k = 0;
+  m_l2_mpki_profile_read_misses_20k = 0;
+  m_l1d_mpki_profile_warp_icount_10k = 0;
+  m_l1d_mpki_profile_warp_icount_20k = 0;
   ctx->ptx_parser->set_ptx_warp_size(m_shader_config);
   ptx_file_line_stats_create_exposed_latency_tracker(m_config.num_shader());
 
@@ -2955,6 +3193,7 @@ void gpgpu_sim::cycle() {
     // Change every remodeled SM at one well-defined core-cycle boundary,
     // before the parallel cluster/core loops observe the active policy.
     maybe_switch_dynamic_kernel_scheduler();
+    maybe_sample_dynamic_kernel_l1d_read_miss_mpki();
   }
   if (m_current_cycle_clock_mask & CORE) {
     // shader core loading (pop from ICNT into core) follows CORE clock
